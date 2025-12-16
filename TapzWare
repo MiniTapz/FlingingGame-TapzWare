@@ -1,0 +1,1026 @@
+-- Fling Script with UI Library
+-- Using the provided UI library
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Load UI Library
+local library = loadstring(game:GetObjects("rbxassetid://7657867786")[1].Source)()
+local Wait = library.subs.Wait
+
+-- Force third person camera
+LocalPlayer.CameraMode = Enum.CameraMode.Classic
+LocalPlayer.CameraMaxZoomDistance = 128
+LocalPlayer.CameraMinZoomDistance = 0.5
+
+-- Settings
+local FLING_POWER = 500
+local instantFlingEnabled = false
+local auraEnabled = false
+local AURA_RADIUS = 15
+
+-- Wait for the grab events
+local GrabEvents = ReplicatedStorage:WaitForChild("GrabEvents")
+local CreateGrabLine = GrabEvents:WaitForChild("CreateGrabLine")
+
+-- Create Window
+local FlingWindow = library:CreateWindow({
+    Name = "Fling Menu",
+    Themeable = {
+        Info = "Fling Script"
+    }
+})
+
+-- Create Tabs
+local FlingTab = FlingWindow:CreateTab({
+    Name = "Fling"
+})
+
+local PlayerTab = FlingWindow:CreateTab({
+    Name = "Player"
+})
+
+local VisualTab = FlingWindow:CreateTab({
+    Name = "Visual"
+})
+
+local SettingsTab = FlingWindow:CreateTab({
+    Name = "Settings"
+})
+
+-- ============================================
+-- FLING TAB
+-- ============================================
+local FlingSection = FlingTab:CreateSection({
+    Name = "Fling Options"
+})
+
+-- Add Toggles
+FlingSection:AddToggle({
+    Name = "Instant Fling",
+    Flag = "InstantFling",
+    Callback = function(value)
+        instantFlingEnabled = value
+        if value then
+            print("✓ Instant Fling ENABLED")
+        else
+            print("✗ Instant Fling DISABLED")
+        end
+    end
+})
+
+FlingSection:AddToggle({
+    Name = "Fling Aura",
+    Flag = "FlingAura",
+    Callback = function(value)
+        auraEnabled = value
+        if value then
+            print("✓ Fling Aura ENABLED")
+            createAura()
+        else
+            print("✗ Fling Aura DISABLED")
+            destroyAura()
+        end
+    end
+})
+
+-- Settings Section
+local FlingSettingsSection = FlingTab:CreateSection({
+    Name = "Settings",
+    Side = "Right"
+})
+
+FlingSettingsSection:AddSlider({
+    Name = "Aura Radius",
+    Flag = "AuraRadius",
+    Value = 15,
+    Min = 5,
+    Max = 50,
+    Format = function(Value)
+        return "Radius: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        AURA_RADIUS = value
+        print("Aura Radius set to:", value)
+        
+        -- Update aura visual immediately if it exists
+        if auraPart then
+            auraPart.Size = Vector3.new(10, AURA_RADIUS * 2, AURA_RADIUS * 2)
+            print("✓ Aura visual updated!")
+        end
+    end
+})
+
+FlingSettingsSection:AddSlider({
+    Name = "Fling Power",
+    Flag = "FlingPower",
+    Value = 500,
+    Min = 100,
+    Max = 1000,
+    Format = function(Value)
+        return "Power: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        FLING_POWER = value
+        print("Fling Power set to:", value, "- will apply to next fling")
+    end
+})
+
+FlingSettingsSection:AddColorpicker({
+    Name = "Aura Color",
+    Flag = "AuraColor",
+    Value = Color3.fromRGB(255, 0, 127),
+    Callback = function(value)
+        print("Aura color changed to:", value)
+        
+        -- Update aura color immediately if it exists
+        if auraPart then
+            auraPart.Color = value
+            print("✓ Aura color updated!")
+        end
+    end
+})
+
+-- ============================================
+-- PLAYER TAB
+-- ============================================
+local PlayerMovementSection = PlayerTab:CreateSection({
+    Name = "Movement"
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Force Shift Lock",
+    Flag = "ForceShiftLock",
+    Callback = function(value)
+        if value then
+            LocalPlayer.DevEnableMouseLock = true
+            print("✓ Shift Lock ENABLED")
+        else
+            LocalPlayer.DevEnableMouseLock = false
+            print("✗ Shift Lock DISABLED")
+        end
+    end
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Strafe",
+    Flag = "Strafe",
+    Callback = function(value)
+        strafeEnabled = value
+        if value then
+            print("✓ Strafe ENABLED")
+        else
+            print("✗ Strafe DISABLED")
+        end
+    end
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Bhop",
+    Flag = "Bhop",
+    Callback = function(value)
+        bhopEnabled = value
+        if value then
+            print("✓ Bhop ENABLED")
+        else
+            print("✗ Bhop DISABLED")
+        end
+    end
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Fly",
+    Flag = "Fly",
+    Callback = function(value)
+        flyEnabled = value
+        if value then
+            print("✓ Fly ENABLED")
+            startFly()
+        else
+            print("✗ Fly DISABLED")
+            stopFly()
+        end
+    end
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Custom Walkspeed",
+    Flag = "CustomWalkspeed",
+    Callback = function(value)
+        customWalkspeed = value
+        if value then
+            print("✓ Custom Walkspeed ENABLED")
+        else
+            print("✗ Custom Walkspeed DISABLED")
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.WalkSpeed = 16
+            end
+        end
+    end
+})
+
+-- Movement Settings
+local PlayerSettingsSection = PlayerTab:CreateSection({
+    Name = "Movement Settings",
+    Side = "Right"
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Bhop Speed",
+    Flag = "BhopSpeed",
+    Value = 50,
+    Min = 10,
+    Max = 200,
+    Format = function(Value)
+        return "Speed: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        bhopSpeed = value
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Bhop Height",
+    Flag = "BhopHeight",
+    Value = 50,
+    Min = 10,
+    Max = 200,
+    Format = function(Value)
+        return "Height: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        bhopHeight = value
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Fly Speed",
+    Flag = "FlySpeed",
+    Value = 50,
+    Min = 10,
+    Max = 300,
+    Format = function(Value)
+        return "Speed: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        flySpeed = value
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Walkspeed",
+    Flag = "Walkspeed",
+    Value = 16,
+    Min = 16,
+    Max = 200,
+    Format = function(Value)
+        return "Speed: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        walkspeedValue = value
+    end
+})
+
+-- ============================================
+-- VISUAL TAB - ESP SYSTEM
+-- ============================================
+
+-- ESP Variables
+local espEnabled = false
+local nametagsEnabled = false
+local espBoxColor = Color3.fromRGB(255, 0, 0)
+local nametagColor = Color3.fromRGB(255, 255, 255)
+local showDistance = false
+local espObjects = {}
+local espBoxSize = 1
+
+-- Movement Variables
+local strafeEnabled = false
+local bhopEnabled = false
+local bhopSpeed = 50
+local bhopHeight = 50
+local flyEnabled = false
+local flySpeed = 50
+local customWalkspeed = false
+local walkspeedValue = 16
+
+-- ESP Section
+local ESPSection = VisualTab:CreateSection({
+    Name = "ESP"
+})
+
+ESPSection:AddToggle({
+    Name = "Bounding Boxes",
+    Flag = "ESP_BoundingBoxes",
+    Callback = function(value)
+        espEnabled = value
+        if value then
+            print("✓ ESP ENABLED")
+            createESP()
+        else
+            print("✗ ESP DISABLED")
+            removeESP()
+        end
+    end
+})
+
+ESPSection:AddToggle({
+    Name = "Nametags",
+    Flag = "ESP_Nametags",
+    Callback = function(value)
+        nametagsEnabled = value
+        if value then
+            print("✓ Nametags ENABLED")
+        else
+            print("✗ Nametags DISABLED")
+        end
+        updateAllESP()
+    end
+})
+
+ESPSection:AddToggle({
+    Name = "Show Distance",
+    Flag = "ESP_ShowDistance",
+    Callback = function(value)
+        showDistance = value
+        updateAllESP()
+    end
+})
+
+-- ESP Settings Section
+local ESPSettingsSection = VisualTab:CreateSection({
+    Name = "ESP Settings",
+    Side = "Right"
+})
+
+ESPSettingsSection:AddSlider({
+    Name = "Box Size",
+    Flag = "ESP_BoxSize",
+    Value = 1,
+    Min = 0.5,
+    Max = 3,
+    Precise = 1,
+    Format = function(Value)
+        return "Size: " .. tostring(Value) .. "x"
+    end,
+    Callback = function(value)
+        espBoxSize = value
+        updateAllESP()
+    end
+})
+
+ESPSettingsSection:AddColorpicker({
+    Name = "Box Color",
+    Flag = "ESP_BoxColor",
+    Value = Color3.fromRGB(255, 0, 0),
+    Callback = function(value)
+        espBoxColor = value
+        updateAllESP()
+    end
+})
+
+ESPSettingsSection:AddColorpicker({
+    Name = "Nametag Color",
+    Flag = "ESP_NametagColor",
+    Value = Color3.fromRGB(255, 255, 255),
+    Callback = function(value)
+        nametagColor = value
+        updateAllESP()
+    end
+})
+
+-- ============================================
+-- SETTINGS TAB
+-- ============================================
+local SettingsSection = SettingsTab:CreateSection({
+    Name = "Menu Settings"
+})
+
+SettingsSection:AddKeybind({
+    Name = "Toggle Menu",
+    Flag = "ToggleMenuKeybind",
+    Value = Enum.KeyCode.RightShift,
+    Callback = function(value)
+        print("Menu keybind changed to:", value.Name)
+    end,
+    Pressed = function()
+        FlingWindow.Unload()
+    end
+})
+
+SettingsSection:AddLabel({
+    Text = "Press the keybind to toggle menu visibility"
+})
+
+-- Function to fling something
+local function flingTarget(target)
+    if not target or not target:IsA("BasePart") then
+        return
+    end
+    
+    if target.Anchored then
+        return
+    end
+    
+    local bv = Instance.new("BodyVelocity")
+    bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    bv.Velocity = Vector3.new(
+        math.random(-FLING_POWER, FLING_POWER),
+        FLING_POWER,
+        math.random(-FLING_POWER, FLING_POWER)
+    )
+    bv.Parent = target
+    
+    task.delay(0.1, function()
+        if bv and bv.Parent then
+            bv:Destroy()
+        end
+    end)
+end
+
+-- ============================================
+-- ESP FUNCTIONS
+-- ============================================
+
+-- Function to create a line between two points
+local function createLine(parent)
+    local line = Instance.new("Part")
+    line.Anchored = true
+    line.CanCollide = false
+    line.Material = Enum.Material.Neon
+    line.Size = Vector3.new(0.05, 0.05, 1)
+    line.Parent = parent
+    return line
+end
+
+-- Function to update a line between two points
+local function updateLine(line, pointA, pointB, color)
+    local distance = (pointA - pointB).Magnitude
+    line.Size = Vector3.new(0.05, 0.05, distance)
+    line.CFrame = CFrame.new(pointA, pointB) * CFrame.new(0, 0, -distance / 2)
+    line.Color = color
+end
+
+-- Function to create 3D bounding box
+local function create3DBox()
+    local boxFolder = Instance.new("Folder")
+    boxFolder.Name = "ESP_Box"
+    
+    -- Create 12 lines for a box (4 top, 4 bottom, 4 connecting)
+    local lines = {}
+    for i = 1, 12 do
+        lines[i] = createLine(boxFolder)
+    end
+    
+    return boxFolder, lines
+end
+
+-- Function to update 3D box around a character
+local function update3DBox(lines, character, color)
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        for _, line in pairs(lines) do
+            line.Transparency = 1
+        end
+        return
+    end
+    
+    -- Get character size with multiplier
+    local rootPart = character.HumanoidRootPart
+    local sizeX, sizeY, sizeZ = 2.5 * espBoxSize, 5 * espBoxSize, 1.5 * espBoxSize
+    
+    -- Calculate corners
+    local cf = rootPart.CFrame
+    local corners = {
+        -- Bottom 4 corners
+        cf * CFrame.new(-sizeX/2, -sizeY/2, -sizeZ/2).Position,
+        cf * CFrame.new(sizeX/2, -sizeY/2, -sizeZ/2).Position,
+        cf * CFrame.new(sizeX/2, -sizeY/2, sizeZ/2).Position,
+        cf * CFrame.new(-sizeX/2, -sizeY/2, sizeZ/2).Position,
+        -- Top 4 corners
+        cf * CFrame.new(-sizeX/2, sizeY/2, -sizeZ/2).Position,
+        cf * CFrame.new(sizeX/2, sizeY/2, -sizeZ/2).Position,
+        cf * CFrame.new(sizeX/2, sizeY/2, sizeZ/2).Position,
+        cf * CFrame.new(-sizeX/2, sizeY/2, sizeZ/2).Position,
+    }
+    
+    -- Update lines
+    -- Bottom square
+    updateLine(lines[1], corners[1], corners[2], color)
+    updateLine(lines[2], corners[2], corners[3], color)
+    updateLine(lines[3], corners[3], corners[4], color)
+    updateLine(lines[4], corners[4], corners[1], color)
+    
+    -- Top square
+    updateLine(lines[5], corners[5], corners[6], color)
+    updateLine(lines[6], corners[6], corners[7], color)
+    updateLine(lines[7], corners[7], corners[8], color)
+    updateLine(lines[8], corners[8], corners[5], color)
+    
+    -- Connecting lines
+    updateLine(lines[9], corners[1], corners[5], color)
+    updateLine(lines[10], corners[2], corners[6], color)
+    updateLine(lines[11], corners[3], corners[7], color)
+    updateLine(lines[12], corners[4], corners[8], color)
+    
+    -- Set visibility
+    for _, line in pairs(lines) do
+        line.Transparency = 0
+    end
+end
+
+-- Function to create ESP for a player
+local function createPlayerESP(player)
+    if player == LocalPlayer then return end
+    if espObjects[player] then return end
+    
+    local espObject = {
+        Player = player,
+        BoxFolder = nil,
+        BoxLines = nil,
+        Nametag = nil
+    }
+    
+    -- Create 3D Box
+    local boxFolder, boxLines = create3DBox()
+    boxFolder.Parent = workspace
+    espObject.BoxFolder = boxFolder
+    espObject.BoxLines = boxLines
+    
+    -- Create BillboardGui for nametag
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESP_Nametag"
+    billboard.AlwaysOnTop = true
+    billboard.Size = UDim2.new(0, 200, 0, 50)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = player.Name
+    nameLabel.TextColor3 = nametagColor
+    nameLabel.TextStrokeTransparency = 0.5
+    nameLabel.Font = Enum.Font.Code
+    nameLabel.TextSize = 16
+    nameLabel.Parent = billboard
+    
+    espObject.Nametag = billboard
+    
+    espObjects[player] = espObject
+    
+    -- Function to update ESP
+    local function updateESP()
+        if not player.Character then
+            for _, line in pairs(boxLines) do
+                line.Transparency = 1
+            end
+            if billboard.Parent then billboard.Parent = nil end
+            return
+        end
+        
+        local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+        if not rootPart then
+            for _, line in pairs(boxLines) do
+                line.Transparency = 1
+            end
+            if billboard.Parent then billboard.Parent = nil end
+            return
+        end
+        
+        -- Update 3D box
+        if espEnabled then
+            update3DBox(boxLines, player.Character, espBoxColor)
+        else
+            for _, line in pairs(boxLines) do
+                line.Transparency = 1
+            end
+        end
+        
+        -- Update nametag
+        if nametagsEnabled and billboard then
+            billboard.Parent = rootPart
+            nameLabel.TextColor3 = nametagColor
+            
+            -- Update distance
+            if showDistance and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local distance = (LocalPlayer.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+                nameLabel.Text = player.Name .. "\n[" .. math.floor(distance) .. " studs]"
+            else
+                nameLabel.Text = player.Name
+            end
+        else
+            billboard.Parent = nil
+        end
+    end
+    
+    -- Initial update
+    updateESP()
+    
+    -- Connect to character added
+    player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        updateESP()
+    end)
+    
+    return espObject
+end
+
+-- Function to remove ESP for a player
+local function removePlayerESP(player)
+    if espObjects[player] then
+        if espObjects[player].BoxFolder then
+            espObjects[player].BoxFolder:Destroy()
+        end
+        if espObjects[player].Nametag then
+            espObjects[player].Nametag:Destroy()
+        end
+        espObjects[player] = nil
+    end
+end
+
+-- Function to create ESP for all players
+function createESP()
+    for _, player in pairs(Players:GetPlayers()) do
+        createPlayerESP(player)
+    end
+end
+
+-- Function to remove all ESP
+function removeESP()
+    for player, _ in pairs(espObjects) do
+        removePlayerESP(player)
+    end
+end
+
+-- Function to update all ESP
+function updateAllESP()
+    for player, espObj in pairs(espObjects) do
+        if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+            
+            -- Update 3D box
+            if espEnabled and espObj.BoxLines then
+                update3DBox(espObj.BoxLines, player.Character, espBoxColor)
+            else
+                if espObj.BoxLines then
+                    for _, line in pairs(espObj.BoxLines) do
+                        line.Transparency = 1
+                    end
+                end
+            end
+            
+            -- Update nametag
+            if nametagsEnabled and espObj.Nametag then
+                espObj.Nametag.Parent = rootPart
+                local nameLabel = espObj.Nametag:FindFirstChildOfClass("TextLabel")
+                if nameLabel then
+                    nameLabel.TextColor3 = nametagColor
+                    
+                    if showDistance and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                        local distance = (LocalPlayer.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+                        nameLabel.Text = player.Name .. "\n[" .. math.floor(distance) .. " studs]"
+                    else
+                        nameLabel.Text = player.Name
+                    end
+                end
+            else
+                if espObj.Nametag then espObj.Nametag.Parent = nil end
+            end
+        end
+    end
+end
+
+-- Player added/removed events
+Players.PlayerAdded:Connect(function(player)
+    if espEnabled or nametagsEnabled then
+        task.wait(1)
+        createPlayerESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removePlayerESP(player)
+end)
+
+-- Update ESP loop
+RunService.RenderStepped:Connect(function()
+    if espEnabled then
+        for player, espObj in pairs(espObjects) do
+            if player.Character and espObj.BoxLines then
+                update3DBox(espObj.BoxLines, player.Character, espBoxColor)
+            end
+        end
+    end
+    
+    if nametagsEnabled then
+        for player, espObj in pairs(espObjects) do
+            if showDistance and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local nameLabel = espObj.Nametag and espObj.Nametag:FindFirstChildOfClass("TextLabel")
+                if nameLabel and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    local rootPart = player.Character.HumanoidRootPart
+                    local distance = (LocalPlayer.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude
+                    nameLabel.Text = player.Name .. "\n[" .. math.floor(distance) .. " studs]"
+                end
+            end
+        end
+    end
+end)
+
+-- ============================================
+-- MOVEMENT SYSTEM FUNCTIONS
+-- ============================================
+
+local flyBodyVelocity = nil
+local flyBodyGyro = nil
+local UserInputService = game:GetService("UserInputService")
+local Camera = workspace.CurrentCamera
+
+-- Fly functions
+function startFly()
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+    
+    local rootPart = LocalPlayer.Character.HumanoidRootPart
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    
+    if humanoid then
+        humanoid.PlatformStand = true
+    end
+    
+    flyBodyVelocity = Instance.new("BodyVelocity")
+    flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+    flyBodyVelocity.Parent = rootPart
+    
+    flyBodyGyro = Instance.new("BodyGyro")
+    flyBodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBodyGyro.P = 9000
+    flyBodyGyro.Parent = rootPart
+    
+    print("Fly started")
+end
+
+function stopFly()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.PlatformStand = false
+    end
+    
+    if flyBodyVelocity then
+        flyBodyVelocity:Destroy()
+        flyBodyVelocity = nil
+    end
+    if flyBodyGyro then
+        flyBodyGyro:Destroy()
+        flyBodyGyro = nil
+    end
+    
+    print("Fly stopped")
+end
+
+-- Main movement loop
+RunService.Heartbeat:Connect(function()
+    if not LocalPlayer.Character then return end
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoid or not rootPart then return end
+    
+    -- Custom Walkspeed
+    if customWalkspeed and not flyEnabled then
+        humanoid.WalkSpeed = walkspeedValue
+    elseif not customWalkspeed and not flyEnabled and not bhopEnabled then
+        humanoid.WalkSpeed = 16
+    end
+    
+    -- Strafe
+    if strafeEnabled and not flyEnabled then
+        humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
+    end
+    
+    -- Bhop
+    if bhopEnabled and not flyEnabled then
+        if humanoid:GetState() == Enum.HumanoidStateType.Landed or humanoid:GetState() == Enum.HumanoidStateType.Running then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+        
+        if humanoid:GetState() == Enum.HumanoidStateType.Freefall then
+            humanoid.WalkSpeed = bhopSpeed
+            rootPart.Velocity = Vector3.new(
+                rootPart.Velocity.X,
+                bhopHeight / 10,
+                rootPart.Velocity.Z
+            )
+        end
+    end
+    
+    -- Fly
+    if flyEnabled then
+        if not flyBodyVelocity or not flyBodyGyro then
+            startFly()
+        end
+        
+        if flyBodyVelocity and flyBodyGyro then
+            local moveDirection = Vector3.new(0, 0, 0)
+            
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                moveDirection = moveDirection + (Camera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                moveDirection = moveDirection - (Camera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                moveDirection = moveDirection - Camera.CFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                moveDirection = moveDirection + Camera.CFrame.RightVector
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                moveDirection = moveDirection + Vector3.new(0, 1, 0)
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+                moveDirection = moveDirection - Vector3.new(0, 1, 0)
+            end
+            
+            if moveDirection.Magnitude > 0 then
+                flyBodyVelocity.Velocity = moveDirection.Unit * flySpeed
+            else
+                flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
+            end
+            
+            flyBodyGyro.CFrame = Camera.CFrame
+        end
+    else
+        if flyBodyVelocity or flyBodyGyro then
+            stopFly()
+        end
+    end
+end)
+
+-- ============================================
+-- AURA FUNCTIONS
+-- ============================================
+
+-- Aura variables
+local auraPart = nil
+local auraConnection = nil
+
+-- Function to create the aura
+function createAura()
+    if auraPart then
+        auraPart:Destroy()
+    end
+    
+    repeat task.wait() until LocalPlayer.Character
+    repeat task.wait() until LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    
+    print("Creating aura...")
+    
+    auraPart = Instance.new("Part")
+    auraPart.Name = "FlingAura"
+    auraPart.Shape = Enum.PartType.Cylinder
+    auraPart.Size = Vector3.new(10, AURA_RADIUS * 2, AURA_RADIUS * 2)
+    auraPart.Transparency = 0.7
+    auraPart.Color = Color3.fromRGB(255, 0, 127)
+    auraPart.Material = Enum.Material.Neon
+    auraPart.CanCollide = false
+    auraPart.Anchored = true
+    auraPart.CastShadow = false
+    auraPart.Parent = workspace
+    
+    print("✓ Aura created!")
+    
+    -- Active scanning
+    local lastCheck = 0
+    local recentlyFlung = {}
+    
+    auraConnection = RunService.RenderStepped:Connect(function()
+        if not auraEnabled then return end
+        
+        if tick() - lastCheck < 0.2 then return end
+        lastCheck = tick()
+        
+        if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            return
+        end
+        
+        local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+        
+        -- Check all players
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local humanoid = player.Character:FindFirstChild("Humanoid")
+                local theirRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                
+                if humanoid and humanoid.Health > 0 and theirRoot then
+                    local distance = (theirRoot.Position - myPos).Magnitude
+                    
+                    if distance <= AURA_RADIUS then
+                        if not recentlyFlung[player] or tick() - recentlyFlung[player] > 1 then
+                            print("🎯 FLINGING Player:", player.Name)
+                            recentlyFlung[player] = tick()
+                            
+                            -- Set network ownership
+                            local SetNetworkOwner = GrabEvents:FindFirstChild("SetNetworkOwner")
+                            if SetNetworkOwner then
+                                SetNetworkOwner:FireServer(theirRoot, theirRoot.CFrame)
+                            end
+                            
+                            -- Create grab line
+                            local myRoot = LocalPlayer.Character.HumanoidRootPart
+                            local offsetCFrame = myRoot.CFrame:ToObjectSpace(theirRoot.CFrame)
+                            CreateGrabLine:FireServer(theirRoot, offsetCFrame)
+                            
+                            task.wait(0.05)
+                            flingTarget(theirRoot)
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Check for parts
+        local region = Region3.new(myPos - Vector3.new(AURA_RADIUS, AURA_RADIUS, AURA_RADIUS), 
+                                    myPos + Vector3.new(AURA_RADIUS, AURA_RADIUS, AURA_RADIUS))
+        region = region:ExpandToGrid(4)
+        
+        local parts = workspace:FindPartsInRegion3(region, LocalPlayer.Character, 100)
+        
+        for _, part in pairs(parts) do
+            if part:IsA("BasePart") and not part.Anchored then
+                if not part:IsDescendantOf(LocalPlayer.Character) and part.Name ~= "FlingAura" then
+                    local partDistance = (part.Position - myPos).Magnitude
+                    
+                    if partDistance <= AURA_RADIUS then
+                        if not recentlyFlung[part] or tick() - recentlyFlung[part] > 1 then
+                            recentlyFlung[part] = tick()
+                            
+                            local SetNetworkOwner = GrabEvents:FindFirstChild("SetNetworkOwner")
+                            if SetNetworkOwner then
+                                SetNetworkOwner:FireServer(part, part.CFrame)
+                            end
+                            
+                            local myRoot = LocalPlayer.Character.HumanoidRootPart
+                            local offsetCFrame = myRoot.CFrame:ToObjectSpace(part.CFrame)
+                            CreateGrabLine:FireServer(part, offsetCFrame)
+                            
+                            task.wait(0.05)
+                            flingTarget(part)
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Update aura position
+        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = LocalPlayer.Character.HumanoidRootPart
+            local position = rootPart.Position - Vector3.new(0, rootPart.Size.Y / 2 + 2, 0)
+            auraPart.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
+        end
+    end)
+end
+
+-- Function to destroy the aura
+function destroyAura()
+    if auraPart then
+        auraPart:Destroy()
+        auraPart = nil
+    end
+    if auraConnection then
+        auraConnection:Disconnect()
+        auraConnection = nil
+    end
+    print("✗ Aura destroyed")
+end
+
+-- Listen for instant fling (manual grabs)
+CreateGrabLine.OnClientEvent:Connect(function(player, grabbedPart, offset)
+    if player == LocalPlayer and instantFlingEnabled then
+        print("🎯 Grabbed:", grabbedPart.Name)
+        
+        task.wait(0.05)
+        
+        -- Check if it's a player
+        local character = grabbedPart.Parent
+        if character and character:FindFirstChild("Humanoid") then
+            local targetPlayer = Players:GetPlayerFromCharacter(character)
+            if targetPlayer then
+                print("🎯 This is player:", targetPlayer.Name)
+                local theirRoot = character:FindFirstChild("HumanoidRootPart")
+                if theirRoot then
+                    flingTarget(theirRoot)
+                end
+                return
+            end
+        end
+        
+        flingTarget(grabbedPart)
+    end
+end)
+
+print("═══════════════════════════════════════")
+print("🎯 FLING SCRIPT LOADED")
+print("UI Library Loaded Successfully")
+print("═══════════════════════════════════════")
