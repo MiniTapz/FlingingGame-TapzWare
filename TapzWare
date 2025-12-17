@@ -1,19 +1,46 @@
--- Fling Script with UI Library
--- Using the provided UI library
+-- ============================================
+-- FLING SCRIPT WITH UI LIBRARY
+-- ============================================
+-- IMPORTANT: This MUST be executed as a LocalScript!
+-- Place in: StarterPlayer > StarterPlayerScripts
+-- Or execute via: Executor (Synapse, KRNL, etc.)
+-- ============================================
+
+print("=== SCRIPT STARTING ===")
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 
+print("LocalPlayer found:", LocalPlayer.Name)
+
+-- Wait for character
+if not LocalPlayer.Character then
+    LocalPlayer.CharacterAdded:Wait()
+end
+print("Character found:", LocalPlayer.Character.Name)
+
 -- Load UI Library
-local library = loadstring(game:GetObjects("rbxassetid://7657867786")[1].Source)()
+print("Loading UI Library...")
+local success, library = pcall(function()
+    return loadstring(game:GetObjects("rbxassetid://7657867786")[1].Source)()
+end)
+
+if not success then
+    warn("Failed to load UI library:", library)
+    return
+end
+
+print("UI Library loaded successfully!")
 local Wait = library.subs.Wait
 
 -- Force third person camera
 LocalPlayer.CameraMode = Enum.CameraMode.Classic
 LocalPlayer.CameraMaxZoomDistance = 128
-LocalPlayer.CameraMinZoomDistance = 0.5
+LocalPlayer.CameraMinZoomDistance = 12 -- Set to 12 first to force third person
+task.wait(0.1) -- Brief delay
+LocalPlayer.CameraMinZoomDistance = 0.5 -- Then back to 0.5 to allow full zoom
 
 -- Settings
 local FLING_POWER = 500
@@ -21,17 +48,92 @@ local instantFlingEnabled = false
 local auraEnabled = false
 local AURA_RADIUS = 15
 
+-- Aura visualization settings
+local showAuraVisualization = true
+local auraRingColor = Color3.fromRGB(255, 0, 127)
+local auraRingThickness = 0.5
+local auraRingHeight = 0.3
+local auraRingSpin = false
+local auraSpinSpeed = 1
+local auraRingStyle = "dots" -- "dots" or "solid"
+local currentRotation = 0
+
+-- Aura system variables (declared early to prevent nil errors)
+local auraRingParts = {}
+local auraConnection = nil
+
+-- Walkspeed variables
+local customWalkspeedEnabled = false
+local walkspeedValue = 16
+local antiSlideEnabled = true -- Always enabled with custom walkspeed
+
+-- Air control variable
+local airControlEnabled = false
+
+-- Bhop variables
+local bhopEnabled = false
+local bhopType = "advanced" -- "advanced" or "simple" or "lowhop"
+local baseSpeed = 20
+local speedCap = 70
+local currSpeed = baseSpeed
+local lastDir = Vector3.new(0, 0, 0)
+local bhopJumpBoost = 2.0 -- Multiplier for jump speed boost (Advanced mode only)
+local lowHopJumpHeight = 3 -- Jump height for LowHop mode
+local bhopFallSpeed = 50 -- Fall speed for LowHop mode
+
+-- Infinite Jump variable
+local infiniteJumpEnabled = false
+local infiniteJumpPower = 50 -- Power of infinite jumps
+
+-- Auto Strafe variables
+local autoStrafeEnabled = false
+local autoStrafeIntensity = 1 -- Speed of rotation (1-10)
+local autoStrafeAngle = 0 -- Current angle for circular motion
+local autoStrafeAnchor = nil -- The center point to circle around
+local autoStrafeAnchorPart = nil -- Visible part for debugging
+local autoStrafeRadius = 5 -- Distance from anchor to circle around
+
+-- Force Shift Lock variable
+local forceShiftLockEnabled = false
+
 -- Wait for the grab events
-local GrabEvents = ReplicatedStorage:WaitForChild("GrabEvents")
-local CreateGrabLine = GrabEvents:WaitForChild("CreateGrabLine")
+print("Waiting for GrabEvents...")
+local GrabEvents = ReplicatedStorage:WaitForChild("GrabEvents", 10)
+if not GrabEvents then
+    warn("GrabEvents not found! This game may not have grab mechanics.")
+else
+    print("GrabEvents found!")
+end
+
+local CreateGrabLine = GrabEvents and GrabEvents:WaitForChild("CreateGrabLine", 5)
+if CreateGrabLine then
+    print("CreateGrabLine found!")
+else
+    warn("CreateGrabLine not found!")
+end
 
 -- Create Window
+print("Creating UI Window...")
 local FlingWindow = library:CreateWindow({
-    Name = "Fling Menu",
+    Name = "TapzWare",
     Themeable = {
         Info = "Fling Script"
     }
 })
+print("UI Window created! Press RightShift to toggle menu")
+
+-- ============================================
+-- PLACEHOLDER FUNCTIONS (defined properly later)
+-- ============================================
+-- These prevent nil errors in callbacks
+local updateAllESP = function() end
+local createPlayerESP = function() end
+local removePlayerESP = function() end
+local update3DBox = function() end
+local updateAuraRing = function() end
+local createAuraRing = function() end
+local createAura = function() end
+local destroyAura = function() end
 
 -- Create Tabs
 local FlingTab = FlingWindow:CreateTab({
@@ -44,10 +146,6 @@ local PlayerTab = FlingWindow:CreateTab({
 
 local VisualTab = FlingWindow:CreateTab({
     Name = "Visual"
-})
-
-local SettingsTab = FlingWindow:CreateTab({
-    Name = "Settings"
 })
 
 -- ============================================
@@ -106,9 +204,9 @@ FlingSettingsSection:AddSlider({
         print("Aura Radius set to:", value)
         
         -- Update aura visual immediately if it exists
-        if auraPart then
-            auraPart.Size = Vector3.new(10, AURA_RADIUS * 2, AURA_RADIUS * 2)
-            print("✓ Aura visual updated!")
+        if auraRingParts and #auraRingParts > 0 then
+            updateAuraRing()
+            print("✓ Aura ring updated!")
         end
     end
 })
@@ -118,7 +216,7 @@ FlingSettingsSection:AddSlider({
     Flag = "FlingPower",
     Value = 500,
     Min = 100,
-    Max = 1000,
+    Max = 10000,
     Format = function(Value)
         return "Power: " .. tostring(Value)
     end,
@@ -128,21 +226,165 @@ FlingSettingsSection:AddSlider({
     end
 })
 
-FlingSettingsSection:AddColorpicker({
-    Name = "Aura Color",
-    Flag = "AuraColor",
-    Value = Color3.fromRGB(255, 0, 127),
+-- Aura Visualization Section
+local AuraVisualSection = FlingTab:CreateSection({
+    Name = "Aura Visualization",
+    Side = "Right"
+})
+
+AuraVisualSection:AddToggle({
+    Name = "Show Aura Ring",
+    Flag = "ShowAuraVisualization",
+    Value = true,
     Callback = function(value)
-        print("Aura color changed to:", value)
+        showAuraVisualization = value
         
-        -- Update aura color immediately if it exists
-        if auraPart then
-            auraPart.Color = value
-            print("✓ Aura color updated!")
+        if value then
+            -- Recreate the ring if aura is enabled
+            if auraEnabled then
+                createAuraRing()
+            end
+            print("✓ Aura visualization ENABLED")
+        else
+            -- Hide the ring
+            for _, part in pairs(auraRingParts) do
+                if part then
+                    part:Destroy()
+                end
+            end
+            auraRingParts = {}
+            print("✗ Aura visualization DISABLED")
         end
     end
 })
 
+AuraVisualSection:AddColorpicker({
+    Name = "Ring Color",
+    Flag = "AuraRingColor",
+    Value = Color3.fromRGB(255, 0, 127),
+    Callback = function(value)
+        auraRingColor = value
+        print("Ring color changed to:", value)
+        
+        -- Update ring color immediately
+        if auraRingParts and #auraRingParts > 0 then
+            for _, part in pairs(auraRingParts) do
+                if part then
+                    part.Color = value
+                end
+            end
+            print("✓ Ring color updated!")
+        end
+    end
+})
+
+print("DEBUG: Ring Thickness slider starting...")
+
+AuraVisualSection:AddSlider({
+    Name = "Ring Thickness",
+    Flag = "RingThickness",
+    Value = 0.5,
+    Min = 0.1,
+    Max = 2,
+    Format = function(Value)
+        return "Thickness: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        auraRingThickness = value
+        print("Ring thickness set to:", value)
+        
+        -- Update ring immediately
+        if auraRingParts and #auraRingParts > 0 then
+            updateAuraRing()
+            print("✓ Ring thickness updated!")
+        end
+    end
+})
+
+print("DEBUG: Ring Height slider starting...")
+
+print("DEBUG: Ring Height slider starting...")
+
+AuraVisualSection:AddSlider({
+    Name = "Ring Height",
+    Flag = "RingHeight",
+    Value = 0.3,
+    Min = 0.1,
+    Max = 2,
+    Format = function(Value)
+        return "Height: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        auraRingHeight = value
+        print("Ring height set to:", value)
+        
+        -- Update ring immediately
+        if auraRingParts and #auraRingParts > 0 then
+            updateAuraRing()
+            print("✓ Ring height updated!")
+        end
+    end
+})
+
+print("DEBUG: Aura visualization section complete!")
+
+-- Ring Animation Section
+local RingAnimationSection = FlingTab:CreateSection({
+    Name = "Ring Animation",
+    Side = "Right"
+})
+
+RingAnimationSection:AddToggle({
+    Name = "Spin Ring",
+    Flag = "SpinRing",
+    Value = false,
+    Callback = function(value)
+        auraRingSpin = value
+        if value then
+            print("✓ Ring spinning ENABLED")
+        else
+            print("✗ Ring spinning DISABLED")
+            currentRotation = 0 -- Reset rotation
+        end
+    end
+})
+
+RingAnimationSection:AddSlider({
+    Name = "Spin Speed",
+    Flag = "SpinSpeed",
+    Value = 1,
+    Min = 0.1,
+    Max = 5,
+    Format = function(Value)
+        return "Speed: " .. tostring(Value) .. "x"
+    end,
+    Callback = function(value)
+        auraSpinSpeed = value
+        print("Spin speed set to:", value .. "x")
+    end
+})
+
+RingAnimationSection:AddDropdown({
+    Name = "Ring Style",
+    Flag = "RingStyle",
+    List = {"Dots", "Solid"},
+    Default = "Dots",
+    Callback = function(value)
+        local newStyle = value:lower()
+        if newStyle ~= auraRingStyle then
+            auraRingStyle = newStyle
+            print("Ring style changed to:", value)
+            
+            -- Recreate ring with new style if it exists
+            if auraRingParts and #auraRingParts > 0 and showAuraVisualization then
+                createAuraRing()
+                print("✓ Ring recreated with new style!")
+            end
+        end
+    end
+})
+
+-- ============================================
 -- ============================================
 -- PLAYER TAB
 -- ============================================
@@ -154,25 +396,55 @@ PlayerMovementSection:AddToggle({
     Name = "Force Shift Lock",
     Flag = "ForceShiftLock",
     Callback = function(value)
+        forceShiftLockEnabled = value
+        pcall(function()
+            if value then
+                LocalPlayer.DevEnableMouseLock = true
+                print("✓ Shift Lock ENABLED")
+            else
+                LocalPlayer.DevEnableMouseLock = false
+                print("✗ Shift Lock DISABLED")
+            end
+        end)
+    end
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Custom Walkspeed",
+    Flag = "CustomWalkspeed",
+    Callback = function(value)
+        customWalkspeedEnabled = value
         if value then
-            LocalPlayer.DevEnableMouseLock = true
-            print("✓ Shift Lock ENABLED")
+            print("✓ Custom Walkspeed ENABLED")
+            print("DEBUG: Setting walkspeed to:", walkspeedValue)
+            -- Apply immediately
+            if LocalPlayer.Character then
+                local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+                if humanoid then
+                    print("DEBUG: Current WalkSpeed:", humanoid.WalkSpeed)
+                    humanoid.WalkSpeed = walkspeedValue
+                    print("DEBUG: After setting WalkSpeed:", humanoid.WalkSpeed)
+                end
+            end
         else
-            LocalPlayer.DevEnableMouseLock = false
-            print("✗ Shift Lock DISABLED")
+            print("✗ Custom Walkspeed DISABLED")
+            -- Reset to default
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+                LocalPlayer.Character.Humanoid.WalkSpeed = 16
+            end
         end
     end
 })
 
 PlayerMovementSection:AddToggle({
-    Name = "Strafe",
-    Flag = "Strafe",
+    Name = "Air Control",
+    Flag = "AirControl",
     Callback = function(value)
-        strafeEnabled = value
+        airControlEnabled = value
         if value then
-            print("✓ Strafe ENABLED")
+            print("✓ Air Control ENABLED")
         else
-            print("✗ Strafe DISABLED")
+            print("✗ Air Control DISABLED")
         end
     end
 })
@@ -191,97 +463,497 @@ PlayerMovementSection:AddToggle({
 })
 
 PlayerMovementSection:AddToggle({
-    Name = "Fly",
-    Flag = "Fly",
+    Name = "Infinite Jump",
+    Flag = "InfiniteJump",
     Callback = function(value)
-        flyEnabled = value
+        infiniteJumpEnabled = value
         if value then
-            print("✓ Fly ENABLED")
-            startFly()
+            print("✓ Infinite Jump ENABLED")
         else
-            print("✗ Fly DISABLED")
-            stopFly()
+            print("✗ Infinite Jump DISABLED")
         end
     end
 })
 
 PlayerMovementSection:AddToggle({
-    Name = "Custom Walkspeed",
-    Flag = "CustomWalkspeed",
+    Name = "Auto Strafe",
+    Flag = "AutoStrafe",
     Callback = function(value)
-        customWalkspeed = value
+        autoStrafeEnabled = value
         if value then
-            print("✓ Custom Walkspeed ENABLED")
+            print("✓ Auto Strafe ENABLED")
         else
-            print("✗ Custom Walkspeed DISABLED")
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-                LocalPlayer.Character.Humanoid.WalkSpeed = 16
-            end
+            print("✗ Auto Strafe DISABLED")
         end
     end
 })
 
 -- Movement Settings
 local PlayerSettingsSection = PlayerTab:CreateSection({
-    Name = "Movement Settings",
+    Name = "Settings",
     Side = "Right"
 })
 
 PlayerSettingsSection:AddSlider({
-    Name = "Bhop Speed",
-    Flag = "BhopSpeed",
-    Value = 50,
-    Min = 10,
-    Max = 200,
-    Format = function(Value)
-        return "Speed: " .. tostring(Value)
-    end,
-    Callback = function(value)
-        bhopSpeed = value
-    end
-})
-
-PlayerSettingsSection:AddSlider({
-    Name = "Bhop Height",
-    Flag = "BhopHeight",
-    Value = 50,
-    Min = 10,
-    Max = 200,
-    Format = function(Value)
-        return "Height: " .. tostring(Value)
-    end,
-    Callback = function(value)
-        bhopHeight = value
-    end
-})
-
-PlayerSettingsSection:AddSlider({
-    Name = "Fly Speed",
-    Flag = "FlySpeed",
-    Value = 50,
-    Min = 10,
-    Max = 300,
-    Format = function(Value)
-        return "Speed: " .. tostring(Value)
-    end,
-    Callback = function(value)
-        flySpeed = value
-    end
-})
-
-PlayerSettingsSection:AddSlider({
-    Name = "Walkspeed",
+    Name = "Walkspeed Value",
     Flag = "Walkspeed",
     Value = 16,
     Min = 16,
     Max = 200,
     Format = function(Value)
-        return "Speed: " .. tostring(Value)
+        return "Walkspeed: " .. tostring(Value)
     end,
     Callback = function(value)
         walkspeedValue = value
+        print("Walkspeed set to:", value)
+        
+        -- Apply immediately if custom walkspeed is enabled
+        if customWalkspeedEnabled and LocalPlayer.Character then
+            local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid.WalkSpeed = value
+            end
+        end
     end
 })
+
+PlayerSettingsSection:AddDropdown({
+    Name = "Bhop Type",
+    Flag = "BhopType",
+    List = {"Advanced", "Simple", "LowHop"},
+    Default = "Advanced",
+    Callback = function(value)
+        bhopType = value:lower()
+        print("Bhop type set to:", value)
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Advanced: Jump Speed Boost",
+    Flag = "JumpSpeedBoost",
+    Value = 2.0,
+    Min = 0.5,
+    Max = 10,
+    Format = function(Value)
+        return "Jump Boost: " .. tostring(Value) .. "x"
+    end,
+    Callback = function(value)
+        bhopJumpBoost = value
+        print("Jump speed boost set to:", value .. "x")
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "LowHop: Jump Height",
+    Flag = "LowHopJumpHeight",
+    Value = 3,
+    Min = 1,
+    Max = 10,
+    Format = function(Value)
+        return "LowHop Height: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        lowHopJumpHeight = value
+        print("LowHop jump height set to:", value)
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "LowHop: Fall Speed",
+    Flag = "LowHopFallSpeed",
+    Value = 50,
+    Min = 0,
+    Max = 500,
+    Format = function(Value)
+        return "LowHop Fall: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        bhopFallSpeed = value
+        print("LowHop fall speed set to:", value)
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Auto Strafe: Circle Radius",
+    Flag = "AutoStrafeRadius",
+    Value = 5,
+    Min = 1,
+    Max = 20,
+    Format = function(Value)
+        return "Strafe Radius: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        autoStrafeRadius = value
+        print("Auto strafe radius set to:", value)
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Auto Strafe: Rotation Speed",
+    Flag = "AutoStrafeSpeed",
+    Value = 1,
+    Min = 0.1,
+    Max = 10,
+    Format = function(Value)
+        return "Strafe Speed: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        autoStrafeIntensity = value
+        print("Auto strafe speed set to:", value)
+    end
+})
+
+PlayerSettingsSection:AddSlider({
+    Name = "Infinite Jump: Power",
+    Flag = "InfiniteJumpPower",
+    Value = 50,
+    Min = 10,
+    Max = 200,
+    Format = function(Value)
+        return "Jump Power: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        infiniteJumpPower = value
+        print("Infinite jump power set to:", value)
+    end
+})
+
+-- Walkspeed system
+local walkspeedConnection = nil
+
+local function setupWalkspeed(character)
+    if walkspeedConnection then
+        walkspeedConnection:Disconnect()
+    end
+    
+    local humanoid = character:WaitForChild("Humanoid")
+    
+    -- Listen for any changes to WalkSpeed and override them
+    walkspeedConnection = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if customWalkspeedEnabled then
+            -- The game just changed walkspeed, override it back
+            if humanoid.WalkSpeed ~= walkspeedValue then
+                humanoid.WalkSpeed = walkspeedValue
+                print("DEBUG: Overriding game walkspeed, forcing to:", walkspeedValue)
+            end
+        end
+    end)
+    
+    -- Also apply immediately
+    if customWalkspeedEnabled then
+        humanoid.WalkSpeed = walkspeedValue
+    end
+end
+
+-- Setup for current character
+if LocalPlayer.Character then
+    setupWalkspeed(LocalPlayer.Character)
+end
+
+-- Setup for future characters
+LocalPlayer.CharacterAdded:Connect(setupWalkspeed)
+
+-- Bhop jump handler
+LocalPlayer.CharacterAdded:Connect(function(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    
+    humanoid.Jumping:Connect(function()
+        if bhopEnabled then
+            if bhopType == "advanced" then
+                -- Advanced bhop: speed boost on jump using slider value
+                currSpeed = math.min(currSpeed + bhopJumpBoost, speedCap)
+                humanoid.WalkSpeed = currSpeed
+                print("Jump boost! Speed:", currSpeed)
+            elseif bhopType == "lowhop" then
+                -- LowHop: speed boost on jump using slider value
+                currSpeed = math.min(currSpeed + 1.5, speedCap)
+                humanoid.WalkSpeed = currSpeed
+                
+                -- Use slider value for jump height
+                humanoid.JumpPower = lowHopJumpHeight * 7 -- Convert to JumpPower
+                humanoid.JumpHeight = lowHopJumpHeight
+                print("LowHop! Speed:", currSpeed)
+            end
+        end
+    end)
+end)
+
+-- Apply to current character if exists
+if LocalPlayer.Character then
+    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+    if humanoid then
+        humanoid.Jumping:Connect(function()
+            if bhopEnabled then
+                if bhopType == "advanced" then
+                    currSpeed = math.min(currSpeed + bhopJumpBoost, speedCap)
+                    humanoid.WalkSpeed = currSpeed
+                    print("Jump boost! Speed:", currSpeed)
+                elseif bhopType == "lowhop" then
+                    currSpeed = math.min(currSpeed + 1.5, speedCap)
+                    humanoid.WalkSpeed = currSpeed
+                    humanoid.JumpPower = lowHopJumpHeight * 7
+                    humanoid.JumpHeight = lowHopJumpHeight
+                    print("LowHop! Speed:", currSpeed)
+                end
+            end
+        end)
+    end
+end
+
+-- Infinite Jump system
+local UserInputService = game:GetService("UserInputService")
+
+UserInputService.JumpRequest:Connect(function()
+    if infiniteJumpEnabled and LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+        if humanoid then
+            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            -- Apply custom jump power
+            local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                rootPart.Velocity = Vector3.new(
+                    rootPart.Velocity.X,
+                    infiniteJumpPower,
+                    rootPart.Velocity.Z
+                )
+            end
+        end
+    end
+end)
+
+-- Backup loop in case the event doesn't catch everything
+RunService.Heartbeat:Connect(function(dt)
+    if LocalPlayer.Character then
+        local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+        local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        
+        -- Walkspeed enforcement
+        if customWalkspeedEnabled and humanoid and humanoid.WalkSpeed ~= walkspeedValue then
+            humanoid.WalkSpeed = walkspeedValue
+        end
+        
+        -- Bhop system (works independently of custom walkspeed)
+        if bhopEnabled and humanoid and rootPart then
+            local moveDir = humanoid.MoveDirection
+            local hzVel = Vector3.new(rootPart.Velocity.X, 0, rootPart.Velocity.Z)
+            
+            if bhopType == "advanced" then
+                -- Advanced bhop with speed management
+                if moveDir.Magnitude > 0 then
+                    lastDir = moveDir.Unit
+                end
+                
+                -- Check for sudden stops (hitting walls)
+                local hzSpeedNow = hzVel.Magnitude
+                if hzSpeedNow < currSpeed * 0.5 and currSpeed > baseSpeed * 1.5 then
+                    currSpeed = baseSpeed
+                    humanoid.WalkSpeed = baseSpeed
+                end
+                
+                -- Handle deceleration when not moving
+                if moveDir.Magnitude == 0 and currSpeed > baseSpeed then
+                    -- Instant stop - kill all momentum immediately
+                    currSpeed = baseSpeed
+                    humanoid.WalkSpeed = baseSpeed
+                    rootPart.Velocity = Vector3.new(0, rootPart.Velocity.Y, 0)
+                elseif moveDir.Magnitude == 0 then
+                    currSpeed = baseSpeed
+                    humanoid.WalkSpeed = baseSpeed
+                    rootPart.Velocity = Vector3.new(0, rootPart.Velocity.Y, 0)
+                else
+                    humanoid.WalkSpeed = currSpeed
+                end
+                
+                -- Auto jump when on ground
+                if humanoid.FloorMaterial ~= Enum.Material.Air then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            elseif bhopType == "lowhop" then
+                -- LowHop: Minecraft-style low jumps with fast falling
+                if moveDir.Magnitude > 0 then
+                    lastDir = moveDir.Unit
+                end
+                
+                -- Fast falling when in air (uses slider value)
+                if humanoid.FloorMaterial == Enum.Material.Air then
+                    -- Pull down faster using slider value
+                    local currentVel = rootPart.Velocity
+                    rootPart.Velocity = Vector3.new(
+                        currentVel.X,
+                        currentVel.Y - bhopFallSpeed * dt, -- Configurable fall speed
+                        currentVel.Z
+                    )
+                end
+                
+                -- Auto jump immediately when touching ground
+                if humanoid.FloorMaterial ~= Enum.Material.Air then
+                    humanoid.JumpPower = lowHopJumpHeight * 7
+                    humanoid.JumpHeight = lowHopJumpHeight
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+                
+                -- Deceleration
+                if moveDir.Magnitude == 0 and currSpeed > baseSpeed then
+                    local decelRate = 30
+                    currSpeed = math.max(baseSpeed, currSpeed - decelRate * dt)
+                    humanoid.WalkSpeed = currSpeed
+                elseif moveDir.Magnitude == 0 then
+                    currSpeed = baseSpeed
+                    humanoid.WalkSpeed = baseSpeed
+                else
+                    humanoid.WalkSpeed = currSpeed
+                end
+            else
+                -- Simple bhop: just auto jump
+                if humanoid.FloorMaterial ~= Enum.Material.Air then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end
+        else
+            -- Reset jump height/power when bhop is disabled
+            if LocalPlayer.Character then
+                local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
+                if humanoid then
+                    humanoid.JumpPower = 50 -- Default
+                    humanoid.JumpHeight = 7.2 -- Default
+                end
+            end
+        end
+        
+        -- Auto Strafe: Circular strafing around a moving anchor point
+        if autoStrafeEnabled and humanoid and rootPart then
+            local moveDir = humanoid.MoveDirection
+            local Camera = workspace.CurrentCamera
+            
+            -- Initialize anchor at character position if not set
+            if not autoStrafeAnchor then
+                autoStrafeAnchor = rootPart.Position
+                
+                -- Create visible anchor part for debugging
+                autoStrafeAnchorPart = Instance.new("Part")
+                autoStrafeAnchorPart.Name = "AutoStrafeAnchor"
+                autoStrafeAnchorPart.Size = Vector3.new(2, 2, 2)
+                autoStrafeAnchorPart.Anchored = true
+                autoStrafeAnchorPart.CanCollide = false
+                autoStrafeAnchorPart.Material = Enum.Material.Neon
+                autoStrafeAnchorPart.BrickColor = BrickColor.new("Bright red")
+                autoStrafeAnchorPart.Transparency = 0.5
+                autoStrafeAnchorPart.Parent = workspace
+            end
+            
+            -- Move the anchor based on player input relative to CAMERA look direction
+            if moveDir.Magnitude > 0 then
+                -- Get camera forward and right vectors (ignore Y)
+                local camLook = Camera.CFrame.LookVector
+                local camRight = Camera.CFrame.RightVector
+                
+                -- Flatten to horizontal plane
+                camLook = Vector3.new(camLook.X, 0, camLook.Z).Unit
+                camRight = Vector3.new(camRight.X, 0, camRight.Z).Unit
+                
+                -- Build movement direction from WASD relative to camera
+                local forward = 0
+                local right = 0
+                
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then forward = forward + 1 end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then forward = forward - 1 end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then right = right + 1 end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then right = right - 1 end
+                
+                local inputDir = (camLook * forward + camRight * right)
+                if inputDir.Magnitude > 0 then
+                    inputDir = inputDir.Unit
+                    
+                    -- Use actual walkspeed value for anchor movement
+                    local moveSpeed = customWalkspeedEnabled and walkspeedValue or humanoid.WalkSpeed
+                    autoStrafeAnchor = autoStrafeAnchor + (inputDir * moveSpeed * dt)
+                end
+            end
+            
+            -- Update anchor part position
+            if autoStrafeAnchorPart then
+                autoStrafeAnchorPart.Position = autoStrafeAnchor
+            end
+            
+            -- Increment circular angle
+            autoStrafeAngle = autoStrafeAngle + (autoStrafeIntensity * dt)
+            if autoStrafeAngle >= math.pi * 2 then
+                autoStrafeAngle = 0
+            end
+            
+            -- Calculate position on circle around anchor using the radius slider
+            local x = math.sin(autoStrafeAngle) * autoStrafeRadius
+            local z = math.cos(autoStrafeAngle) * autoStrafeRadius
+            
+            -- Target position on the circle
+            local targetPos = autoStrafeAnchor + Vector3.new(x, 0, z)
+            
+            -- Move character toward target position
+            local currentPos = Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z)
+            local direction = (Vector3.new(targetPos.X, 0, targetPos.Z) - currentPos)
+            
+            if direction.Magnitude > 0.1 then
+                direction = direction.Unit
+                
+                -- Use actual walkspeed for velocity
+                local speed = customWalkspeedEnabled and walkspeedValue or humanoid.WalkSpeed
+                rootPart.Velocity = Vector3.new(
+                    direction.X * speed * 3, -- Multiply by 3 for aggressive following
+                    rootPart.Velocity.Y,
+                    direction.Z * speed * 3
+                )
+            end
+        else
+            -- Reset anchor when disabled and destroy the part
+            autoStrafeAnchor = nil
+            if autoStrafeAnchorPart then
+                autoStrafeAnchorPart:Destroy()
+                autoStrafeAnchorPart = nil
+            end
+        end
+        
+        -- Force Shift Lock enforcement
+        if forceShiftLockEnabled then
+            pcall(function()
+                if LocalPlayer.DevEnableMouseLock ~= true then
+                    LocalPlayer.DevEnableMouseLock = true
+                end
+            end)
+        end
+        if airControlEnabled and humanoid and rootPart then
+            local moveDir = humanoid.MoveDirection
+            
+            -- Check if in air (not on ground)
+            if humanoid.FloorMaterial == Enum.Material.Air and moveDir.Magnitude > 0 then
+                local wishDir = moveDir.Unit
+                local hzVel = Vector3.new(rootPart.Velocity.X, 0, rootPart.Velocity.Z)
+                local airSpeed = math.max(
+                    bhopEnabled and bhopType == "advanced" and currSpeed or walkspeedValue,
+                    hzVel.Magnitude
+                )
+                
+                -- Instant snap to direction (no inertia, full air control)
+                rootPart.Velocity = Vector3.new(
+                    wishDir.X * airSpeed,
+                    rootPart.Velocity.Y,
+                    wishDir.Z * airSpeed
+                )
+            end
+        end
+        
+        -- Anti-slide: Stop momentum when not moving
+        if humanoid and rootPart and antiSlideEnabled and not airControlEnabled and not bhopEnabled then
+            -- Check if player is not pressing any movement keys
+            local moveVector = humanoid.MoveVector
+            
+            if moveVector.Magnitude == 0 then
+                -- Player is not pressing any movement keys, kill horizontal velocity
+                local velocity = rootPart.Velocity
+                rootPart.Velocity = Vector3.new(0, velocity.Y, 0) -- Keep Y (jumping/falling) but zero out X and Z
+            end
+        end
+    end
+end)
 
 -- ============================================
 -- VISUAL TAB - ESP SYSTEM
@@ -295,16 +967,6 @@ local nametagColor = Color3.fromRGB(255, 255, 255)
 local showDistance = false
 local espObjects = {}
 local espBoxSize = 1
-
--- Movement Variables
-local strafeEnabled = false
-local bhopEnabled = false
-local bhopSpeed = 50
-local bhopHeight = 50
-local flyEnabled = false
-local flySpeed = 50
-local customWalkspeed = false
-local walkspeedValue = 16
 
 -- ESP Section
 local ESPSection = VisualTab:CreateSection({
@@ -336,7 +998,7 @@ ESPSection:AddToggle({
         else
             print("✗ Nametags DISABLED")
         end
-        updateAllESP()
+        if updateAllESP then updateAllESP() end
     end
 })
 
@@ -345,7 +1007,7 @@ ESPSection:AddToggle({
     Flag = "ESP_ShowDistance",
     Callback = function(value)
         showDistance = value
-        updateAllESP()
+        if updateAllESP then updateAllESP() end
     end
 })
 
@@ -367,7 +1029,9 @@ ESPSettingsSection:AddSlider({
     end,
     Callback = function(value)
         espBoxSize = value
-        updateAllESP()
+        if updateAllESP then
+            if updateAllESP then updateAllESP() end
+        end
     end
 })
 
@@ -377,7 +1041,7 @@ ESPSettingsSection:AddColorpicker({
     Value = Color3.fromRGB(255, 0, 0),
     Callback = function(value)
         espBoxColor = value
-        updateAllESP()
+        if updateAllESP then updateAllESP() end
     end
 })
 
@@ -387,33 +1051,11 @@ ESPSettingsSection:AddColorpicker({
     Value = Color3.fromRGB(255, 255, 255),
     Callback = function(value)
         nametagColor = value
-        updateAllESP()
+        if updateAllESP then updateAllESP() end
     end
 })
 
 -- ============================================
--- SETTINGS TAB
--- ============================================
-local SettingsSection = SettingsTab:CreateSection({
-    Name = "Menu Settings"
-})
-
-SettingsSection:AddKeybind({
-    Name = "Toggle Menu",
-    Flag = "ToggleMenuKeybind",
-    Value = Enum.KeyCode.RightShift,
-    Callback = function(value)
-        print("Menu keybind changed to:", value.Name)
-    end,
-    Pressed = function()
-        FlingWindow.Unload()
-    end
-})
-
-SettingsSection:AddLabel({
-    Text = "Press the keybind to toggle menu visibility"
-})
-
 -- Function to fling something
 local function flingTarget(target)
     if not target or not target:IsA("BasePart") then
@@ -478,7 +1120,7 @@ local function create3DBox()
 end
 
 -- Function to update 3D box around a character
-local function update3DBox(lines, character, color)
+update3DBox = function(lines, character, color)
     if not character or not character:FindFirstChild("HumanoidRootPart") then
         for _, line in pairs(lines) do
             line.Transparency = 1
@@ -531,7 +1173,7 @@ local function update3DBox(lines, character, color)
 end
 
 -- Function to create ESP for a player
-local function createPlayerESP(player)
+createPlayerESP = function(player)
     if player == LocalPlayer then return end
     if espObjects[player] then return end
     
@@ -627,7 +1269,7 @@ local function createPlayerESP(player)
 end
 
 -- Function to remove ESP for a player
-local function removePlayerESP(player)
+removePlayerESP = function(player)
     if espObjects[player] then
         if espObjects[player].BoxFolder then
             espObjects[player].BoxFolder:Destroy()
@@ -653,8 +1295,8 @@ function removeESP()
     end
 end
 
--- Function to update all ESP
-function updateAllESP()
+-- Function to update all ESP (overwrites placeholder)
+updateAllESP = function()
     for player, espObj in pairs(espObjects) do
         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
             local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
@@ -728,168 +1370,146 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================
--- MOVEMENT SYSTEM FUNCTIONS
--- ============================================
-
-local flyBodyVelocity = nil
-local flyBodyGyro = nil
-local UserInputService = game:GetService("UserInputService")
-local Camera = workspace.CurrentCamera
-
--- Fly functions
-function startFly()
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        return
-    end
-    
-    local rootPart = LocalPlayer.Character.HumanoidRootPart
-    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
-    
-    if humanoid then
-        humanoid.PlatformStand = true
-    end
-    
-    flyBodyVelocity = Instance.new("BodyVelocity")
-    flyBodyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-    flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-    flyBodyVelocity.Parent = rootPart
-    
-    flyBodyGyro = Instance.new("BodyGyro")
-    flyBodyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    flyBodyGyro.P = 9000
-    flyBodyGyro.Parent = rootPart
-    
-    print("Fly started")
-end
-
-function stopFly()
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
-        LocalPlayer.Character.Humanoid.PlatformStand = false
-    end
-    
-    if flyBodyVelocity then
-        flyBodyVelocity:Destroy()
-        flyBodyVelocity = nil
-    end
-    if flyBodyGyro then
-        flyBodyGyro:Destroy()
-        flyBodyGyro = nil
-    end
-    
-    print("Fly stopped")
-end
-
--- Main movement loop
-RunService.Heartbeat:Connect(function()
-    if not LocalPlayer.Character then return end
-    local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
-    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    
-    if not humanoid or not rootPart then return end
-    
-    -- Custom Walkspeed
-    if customWalkspeed and not flyEnabled then
-        humanoid.WalkSpeed = walkspeedValue
-    elseif not customWalkspeed and not flyEnabled and not bhopEnabled then
-        humanoid.WalkSpeed = 16
-    end
-    
-    -- Strafe
-    if strafeEnabled and not flyEnabled then
-        humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
-    end
-    
-    -- Bhop
-    if bhopEnabled and not flyEnabled then
-        if humanoid:GetState() == Enum.HumanoidStateType.Landed or humanoid:GetState() == Enum.HumanoidStateType.Running then
-            humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-        
-        if humanoid:GetState() == Enum.HumanoidStateType.Freefall then
-            humanoid.WalkSpeed = bhopSpeed
-            rootPart.Velocity = Vector3.new(
-                rootPart.Velocity.X,
-                bhopHeight / 10,
-                rootPart.Velocity.Z
-            )
-        end
-    end
-    
-    -- Fly
-    if flyEnabled then
-        if not flyBodyVelocity or not flyBodyGyro then
-            startFly()
-        end
-        
-        if flyBodyVelocity and flyBodyGyro then
-            local moveDirection = Vector3.new(0, 0, 0)
-            
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                moveDirection = moveDirection + (Camera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                moveDirection = moveDirection - (Camera.CFrame.LookVector * Vector3.new(1, 0, 1)).Unit
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                moveDirection = moveDirection - Camera.CFrame.RightVector
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                moveDirection = moveDirection + Camera.CFrame.RightVector
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                moveDirection = moveDirection + Vector3.new(0, 1, 0)
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-                moveDirection = moveDirection - Vector3.new(0, 1, 0)
-            end
-            
-            if moveDirection.Magnitude > 0 then
-                flyBodyVelocity.Velocity = moveDirection.Unit * flySpeed
-            else
-                flyBodyVelocity.Velocity = Vector3.new(0, 0, 0)
-            end
-            
-            flyBodyGyro.CFrame = Camera.CFrame
-        end
-    else
-        if flyBodyVelocity or flyBodyGyro then
-            stopFly()
-        end
-    end
-end)
-
--- ============================================
 -- AURA FUNCTIONS
 -- ============================================
 
--- Aura variables
-local auraPart = nil
-local auraConnection = nil
-
--- Function to create the aura
-function createAura()
-    if auraPart then
-        auraPart:Destroy()
+-- Function to create the aura ring
+createAuraRing = function()
+    -- Destroy old ring parts
+    for _, part in pairs(auraRingParts) do
+        if part then
+            part:Destroy()
+        end
+    end
+    auraRingParts = {}
+    
+    if not showAuraVisualization then
+        return
     end
     
     repeat task.wait() until LocalPlayer.Character
     repeat task.wait() until LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     
-    print("Creating aura...")
+    print("Creating aura ring...")
     
-    auraPart = Instance.new("Part")
-    auraPart.Name = "FlingAura"
-    auraPart.Shape = Enum.PartType.Cylinder
-    auraPart.Size = Vector3.new(10, AURA_RADIUS * 2, AURA_RADIUS * 2)
-    auraPart.Transparency = 0.7
-    auraPart.Color = Color3.fromRGB(255, 0, 127)
-    auraPart.Material = Enum.Material.Neon
-    auraPart.CanCollide = false
-    auraPart.Anchored = true
-    auraPart.CastShadow = false
-    auraPart.Parent = workspace
+    if auraRingStyle == "solid" then
+        -- Create a solid torus (donut shape) using a Part with a special mesh
+        local solidRing = Instance.new("Part")
+        solidRing.Name = "AuraRingSegment"
+        solidRing.Shape = Enum.PartType.Ball
+        solidRing.Size = Vector3.new(1, 1, 1)
+        solidRing.Transparency = 0.3
+        solidRing.Color = auraRingColor
+        solidRing.Material = Enum.Material.Neon
+        solidRing.CanCollide = false
+        solidRing.Anchored = true
+        solidRing.CastShadow = false
+        solidRing.Parent = workspace
+        
+        -- Add a SpecialMesh to create the ring/torus shape  
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.FileMesh
+        mesh.MeshId = "rbxassetid://3270017" -- Torus mesh
+        mesh.Scale = Vector3.new(AURA_RADIUS * 0.4, auraRingThickness, AURA_RADIUS * 0.4)
+        mesh.Parent = solidRing
+        
+        table.insert(auraRingParts, solidRing)
+        print("✓ Solid aura ring created!")
+    else
+        -- Create ring using multiple cylinder parts arranged in a circle (dots style)
+        local numSegments = 36
+        local segmentAngle = (math.pi * 2) / numSegments
+        
+        for i = 1, numSegments do
+            local angle = segmentAngle * i
+            local segment = Instance.new("Part")
+            segment.Name = "AuraRingSegment"
+            segment.Shape = Enum.PartType.Cylinder
+            segment.Size = Vector3.new(auraRingHeight, auraRingThickness, auraRingThickness)
+            segment.Transparency = 0.3
+            segment.Color = auraRingColor
+            segment.Material = Enum.Material.Neon
+            segment.CanCollide = false
+            segment.Anchored = true
+            segment.CastShadow = false
+            segment.Parent = workspace
+            
+            table.insert(auraRingParts, segment)
+        end
+        print("✓ Aura ring created with", #auraRingParts, "segments! Style: dots")
+    end
+end
+
+-- Function to update aura ring position and size
+updateAuraRing = function()
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        print("DEBUG: updateAuraRing - No character/root")
+        return
+    end
     
-    print("✓ Aura created!")
+    if not showAuraVisualization then
+        print("DEBUG: updateAuraRing - Visualization disabled")
+        return
+    end
+    
+    if #auraRingParts == 0 then
+        print("DEBUG: updateAuraRing - No ring parts exist")
+        return
+    end
+    
+    print("DEBUG: Updating", #auraRingParts, "ring segments with radius", AURA_RADIUS)
+    
+    -- Update rotation if spinning is enabled
+    if auraRingSpin then
+        currentRotation = currentRotation + (0.02 * auraSpinSpeed)
+        if currentRotation >= math.pi * 2 then
+            currentRotation = 0
+        end
+    end
+    
+    local rootPart = LocalPlayer.Character.HumanoidRootPart
+    local position = rootPart.Position - Vector3.new(0, rootPart.Size.Y / 2 + 2, 0)
+    
+    local numSegments = #auraRingParts
+    local segmentAngle = (math.pi * 2) / numSegments
+    
+    if auraRingStyle == "solid" then
+        -- Update solid ring (single torus mesh part)
+        local solidRing = auraRingParts[1]
+        if solidRing then
+            solidRing.CFrame = CFrame.new(position) * CFrame.Angles(0, currentRotation, 0)
+            solidRing.Color = auraRingColor
+            
+            -- Update mesh scale
+            local mesh = solidRing:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh.Scale = Vector3.new(AURA_RADIUS * 0.4, auraRingThickness, AURA_RADIUS * 0.4)
+            end
+        end
+    else
+        -- Update dots ring (cylinder segments)
+        for i, segment in pairs(auraRingParts) do
+            if segment then
+                local angle = segmentAngle * i + currentRotation
+                local x = math.cos(angle) * AURA_RADIUS
+                local z = math.sin(angle) * AURA_RADIUS
+                
+                local segmentPos = position + Vector3.new(x, 0, z)
+                segment.CFrame = CFrame.new(segmentPos) * CFrame.Angles(0, angle, math.rad(90))
+                segment.Size = Vector3.new(auraRingHeight, auraRingThickness, auraRingThickness)
+                segment.Color = auraRingColor
+            end
+        end
+    end
+    
+    print("DEBUG: Ring update complete!")
+end
+
+-- Function to create the aura
+createAura = function()
+    createAuraRing()
+    
+    print("Creating aura scanning system...")
     
     -- Active scanning
     local lastCheck = 0
@@ -898,7 +1518,10 @@ function createAura()
     auraConnection = RunService.RenderStepped:Connect(function()
         if not auraEnabled then return end
         
-        if tick() - lastCheck < 0.2 then return end
+        if tick() - lastCheck < 0.2 then 
+            updateAuraRing()
+            return 
+        end
         lastCheck = tick()
         
         if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
@@ -949,7 +1572,7 @@ function createAura()
         
         for _, part in pairs(parts) do
             if part:IsA("BasePart") and not part.Anchored then
-                if not part:IsDescendantOf(LocalPlayer.Character) and part.Name ~= "FlingAura" then
+                if not part:IsDescendantOf(LocalPlayer.Character) and part.Name ~= "AuraRingSegment" then
                     local partDistance = (part.Position - myPos).Magnitude
                     
                     if partDistance <= AURA_RADIUS then
@@ -973,21 +1596,20 @@ function createAura()
             end
         end
         
-        -- Update aura position
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            local rootPart = LocalPlayer.Character.HumanoidRootPart
-            local position = rootPart.Position - Vector3.new(0, rootPart.Size.Y / 2 + 2, 0)
-            auraPart.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.rad(90))
-        end
+        -- Update aura ring position
+        updateAuraRing()
     end)
 end
 
 -- Function to destroy the aura
-function destroyAura()
-    if auraPart then
-        auraPart:Destroy()
-        auraPart = nil
+destroyAura = function()
+    for _, part in pairs(auraRingParts) do
+        if part then
+            part:Destroy()
+        end
     end
+    auraRingParts = {}
+    
     if auraConnection then
         auraConnection:Disconnect()
         auraConnection = nil
@@ -1019,8 +1641,3 @@ CreateGrabLine.OnClientEvent:Connect(function(player, grabbedPart, offset)
         flingTarget(grabbedPart)
     end
 end)
-
-print("═══════════════════════════════════════")
-print("🎯 FLING SCRIPT LOADED")
-print("UI Library Loaded Successfully")
-print("═══════════════════════════════════════")
