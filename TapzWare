@@ -48,6 +48,22 @@ local instantFlingEnabled = false
 local auraEnabled = false
 local AURA_RADIUS = 15
 
+-- Target System
+local targetEnabled = false
+local autoTargetEnabled = false -- Auto-select closest player
+local targetPlayer = nil
+local TARGET_MAX_DISTANCE = 1500 -- Maximum distance to start following
+local TARGET_STOP_DISTANCE = 25 -- Distance to stop tweening at
+local TARGET_TWEEN_SPEED = 50 -- Speed in studs per second
+local targetTween = nil
+local targetConnection = nil
+
+-- Map Bounds System
+local MAP_BOUNDS_ENABLED = true
+local MAP_BOUNDS_CENTER = Vector3.new(27.173, 119.848, 50.196)
+local MAP_BOUNDS_SIZE = Vector3.new(1433.347, 739.603, 1488.309)
+local returningToSpawn = false
+
 -- Aura visualization settings
 local showAuraVisualization = true
 local auraRingColor = Color3.fromRGB(255, 0, 127)
@@ -65,8 +81,10 @@ local auraConnection = nil
 -- KillAura Settings (COMPLETELY SEPARATE)
 local killAuraEnabled = false
 local KILLAURA_RADIUS = 15
-local KILLAURA_VOID_Y = -500 -- Much deeper void
+local KILLAURA_VOID_Y = -10000 -- Extremely deep void for reliable kills
 local KILLAURA_DELAY = 1.5 -- Longer delay to ensure death
+local KILLAURA_BASE_VELOCITY = 50000 -- Base slam velocity
+local KILLAURA_SPIKE_VELOCITY = 100000 -- Nuclear spike velocity
 local killAuraConnection = nil
 local recentlyKilled = {}
 
@@ -88,6 +106,10 @@ local antiSlideEnabled = true -- Always enabled with custom walkspeed
 
 -- Air control variable
 local airControlEnabled = false
+
+-- Noclip variable
+local noclipEnabled = false
+local noclipConnection = nil
 
 -- Bhop variables
 local bhopEnabled = false
@@ -404,6 +426,167 @@ RingAnimationSection:AddDropdown({
 })
 
 -- ============================================
+-- TARGET SYSTEM
+-- ============================================
+local TargetSection = FlingTab:CreateSection({
+    Name = "Target Player"
+})
+
+-- Function to get player list
+local function getPlayerList()
+    local playerList = {}
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            table.insert(playerList, player.Name)
+        end
+    end
+    return playerList
+end
+
+TargetSection:AddToggle({
+    Name = "Enable Target",
+    Flag = "TargetEnabled",
+    Callback = function(value)
+        targetEnabled = value
+        if value then
+            if autoTargetEnabled then
+                print("🎯 Target Mode ENABLED - Auto-targeting closest player")
+            elseif targetPlayer then
+                print("🎯 Target Mode ENABLED - Following:", targetPlayer.Name)
+            else
+                print("⚠️ Target Mode ENABLED but no player selected!")
+            end
+        else
+            print("✗ Target Mode DISABLED")
+            -- Stop any active tween
+            if targetTween then
+                targetTween:Cancel()
+                targetTween = nil
+            end
+        end
+    end
+})
+
+TargetSection:AddToggle({
+    Name = "Auto Target (Closest)",
+    Flag = "AutoTarget",
+    Callback = function(value)
+        autoTargetEnabled = value
+        if value then
+            print("🎯 Auto Target ENABLED - Will follow closest player")
+            targetPlayer = nil -- Clear manual selection
+        else
+            print("✗ Auto Target DISABLED")
+        end
+    end
+})
+
+TargetSection:AddDropdown({
+    Name = "Select Target",
+    Flag = "TargetPlayer",
+    List = getPlayerList(),
+    Callback = function(value)
+        -- Find the player object
+        targetPlayer = Players:FindFirstChild(value)
+        if targetPlayer then
+            print("🎯 Target selected:", targetPlayer.Name)
+            autoTargetEnabled = false -- Disable auto when manually selecting
+        else
+            print("⚠️ Player not found:", value)
+        end
+    end
+})
+
+TargetSection:AddButton({
+    Name = "Refresh Player List",
+    Callback = function()
+        print("🔄 Refreshing player list...")
+        -- This would need to recreate the dropdown, but the UI library might not support it
+        -- For now just print the current players
+        local players = getPlayerList()
+        print("Current players:")
+        for _, name in pairs(players) do
+            print("  -", name)
+        end
+    end
+})
+
+-- Target Settings
+local TargetSettingsSection = FlingTab:CreateSection({
+    Name = "Target Settings",
+    Side = "Right"
+})
+
+TargetSettingsSection:AddSlider({
+    Name = "Max Follow Distance",
+    Flag = "TargetMaxDistance",
+    Value = 1500,
+    Min = 100,
+    Max = 3000,
+    Format = function(Value)
+        return "Max: " .. tostring(Value) .. " studs"
+    end,
+    Callback = function(value)
+        TARGET_MAX_DISTANCE = value
+        print("Target max distance set to:", value)
+    end
+})
+
+TargetSettingsSection:AddSlider({
+    Name = "Stop Distance",
+    Flag = "TargetStopDistance",
+    Value = 25,
+    Min = 10,
+    Max = 100,
+    Format = function(Value)
+        return "Stop: " .. tostring(Value) .. " studs"
+    end,
+    Callback = function(value)
+        TARGET_STOP_DISTANCE = value
+        print("Target stop distance set to:", value)
+    end
+})
+
+TargetSettingsSection:AddSlider({
+    Name = "Tween Speed",
+    Flag = "TargetTweenSpeed",
+    Value = 50,
+    Min = 10,
+    Max = 200,
+    Format = function(Value)
+        return "Speed: " .. tostring(Value) .. " studs/s"
+    end,
+    Callback = function(value)
+        TARGET_TWEEN_SPEED = value
+        print("Target tween speed set to:", value, "studs/s")
+    end
+})
+
+TargetSettingsSection:AddToggle({
+    Name = "Map Bounds Protection",
+    Flag = "MapBoundsEnabled",
+    Value = true,
+    Callback = function(value)
+        MAP_BOUNDS_ENABLED = value
+        if value then
+            print("✓ Map Bounds Protection ENABLED")
+            print("  Center:", MAP_BOUNDS_CENTER)
+            print("  Size:", MAP_BOUNDS_SIZE)
+        else
+            print("✗ Map Bounds Protection DISABLED")
+        end
+    end
+})
+
+TargetSettingsSection:AddButton({
+    Name = "Return to Spawn Now",
+    Callback = function()
+        print("🏠 Manually returning to spawn...")
+        returnToSpawn()
+    end
+})
+
+-- ============================================
 -- KILLAURA TAB (COMPLETELY SEPARATE)
 -- ============================================
 local KillAuraSection = KillAuraTab:CreateSection({
@@ -421,6 +604,53 @@ KillAuraSection:AddToggle({
         else
             print("✗ KillAura DISABLED")
             destroyKillAura()
+        end
+    end
+})
+
+KillAuraSection:AddButton({
+    Name = "Scan for Kill Zones",
+    Callback = function()
+        print("=== SCANNING FOR KILL ZONES ===")
+        local killZones = {}
+        
+        for _, obj in pairs(workspace:GetDescendants()) do
+            -- Check part names
+            if obj:IsA("BasePart") then
+                local name = obj.Name:lower()
+                if name:match("kill") or name:match("death") or 
+                   name:match("void") or name:match("lava") or
+                   name:match("damage") or name:match("hazard") or
+                   name:match("hurt") or name:match("deadly") then
+                    table.insert(killZones, {
+                        Part = obj,
+                        Name = obj.Name,
+                        Position = obj.Position,
+                        Size = obj.Size
+                    })
+                    print("✓ Kill Zone:", obj:GetFullName())
+                    print("  Position:", obj.Position)
+                    print("  Size:", obj.Size)
+                end
+            end
+            
+            -- Check for scripts that might kill
+            if (obj:IsA("Script") or obj:IsA("LocalScript")) and obj.Parent:IsA("BasePart") then
+                local name = obj.Name:lower()
+                if name:match("kill") or name:match("damage") or name:match("touch") or name:match("death") then
+                    print("✓ Kill Script:", obj:GetFullName())
+                    print("  On part:", obj.Parent.Name)
+                    print("  Position:", obj.Parent.Position)
+                end
+            end
+        end
+        
+        if #killZones > 0 then
+            print("═══════════════════════════════")
+            print("Total kill zones found:", #killZones)
+            print("═══════════════════════════════")
+        else
+            print("⚠️ No kill zones found in workspace")
         end
     end
 })
@@ -455,8 +685,8 @@ KillAuraSettingsSection:AddSlider({
 KillAuraSettingsSection:AddSlider({
     Name = "Void Y Position",
     Flag = "KillAuraVoidY",
-    Value = -100,
-    Min = -1000,
+    Value = -10000,
+    Min = -50000,
     Max = -100,
     Format = function(v)
         return "Void Y: " .. v
@@ -464,6 +694,36 @@ KillAuraSettingsSection:AddSlider({
     Callback = function(v)
         KILLAURA_VOID_Y = v
         print("KillAura Void Y set to:", v)
+    end
+})
+
+KillAuraSettingsSection:AddSlider({
+    Name = "Base Slam Velocity",
+    Flag = "KillAuraBaseVelocity",
+    Value = 50000,
+    Min = 1000,
+    Max = 200000,
+    Format = function(v)
+        return "Base: " .. v
+    end,
+    Callback = function(v)
+        KILLAURA_BASE_VELOCITY = v
+        print("KillAura Base Velocity set to:", v)
+    end
+})
+
+KillAuraSettingsSection:AddSlider({
+    Name = "Spike Velocity (Nuclear)",
+    Flag = "KillAuraSpikeVelocity",
+    Value = 100000,
+    Min = 10000,
+    Max = 500000,
+    Format = function(v)
+        return "Spike: " .. v
+    end,
+    Callback = function(v)
+        KILLAURA_SPIKE_VELOCITY = v
+        print("KillAura Spike Velocity set to:", v)
     end
 })
 
@@ -686,6 +946,47 @@ PlayerMovementSection:AddToggle({
             print("✓ Air Control ENABLED")
         else
             print("✗ Air Control DISABLED")
+        end
+    end
+})
+
+PlayerMovementSection:AddToggle({
+    Name = "Noclip",
+    Flag = "Noclip",
+    Callback = function(value)
+        noclipEnabled = value
+        if value then
+            print("✓ Noclip ENABLED")
+            
+            -- Create noclip loop
+            noclipConnection = RunService.Stepped:Connect(function()
+                if noclipEnabled and LocalPlayer.Character then
+                    for _, child in pairs(LocalPlayer.Character:GetDescendants()) do
+                        if child:IsA("BasePart") and child.CanCollide == true then
+                            child.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        else
+            print("✗ Noclip DISABLED")
+            
+            -- Disconnect noclip loop
+            if noclipConnection then
+                noclipConnection:Disconnect()
+                noclipConnection = nil
+            end
+            
+            -- Re-enable collision
+            if LocalPlayer.Character then
+                for _, child in pairs(LocalPlayer.Character:GetDescendants()) do
+                    if child:IsA("BasePart") then
+                        if child.Name ~= "Head" then
+                            child.CanCollide = true
+                        end
+                    end
+                end
+            end
         end
     end
 })
@@ -962,11 +1263,386 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
+-- ============================================
+-- MAP BOUNDS HELPER FUNCTIONS
+-- ============================================
+
+-- Helper function to check if position is within map bounds
+local function isWithinMapBounds(position)
+    if not MAP_BOUNDS_ENABLED then
+        return true -- Bounds disabled, always return true
+    end
+    
+    local min = MAP_BOUNDS_CENTER - (MAP_BOUNDS_SIZE / 2)
+    local max = MAP_BOUNDS_CENTER + (MAP_BOUNDS_SIZE / 2)
+    
+    return position.X >= min.X and position.X <= max.X and
+           position.Y >= min.Y and position.Y <= max.Y and
+           position.Z >= min.Z and position.Z <= max.Z
+end
+
+-- Helper function to return player to spawn (0,0,0 or map center)
+local function returnToSpawn()
+    if returningToSpawn then return end -- Already returning
+    
+    returningToSpawn = true
+    print("⚠️ OUT OF BOUNDS! Returning to spawn...")
+    
+    local rootPart = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then 
+        returningToSpawn = false
+        return 
+    end
+    
+    -- Clean up any existing targeting
+    targetPlayer = nil
+    local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+    if bodyPos then
+        bodyPos:Destroy()
+    end
+    
+    -- Create BodyPosition to return to spawn
+    local returnBodyPos = Instance.new("BodyPosition")
+    returnBodyPos.Name = "ReturnToSpawnBodyPosition"
+    returnBodyPos.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+    returnBodyPos.P = 10000
+    returnBodyPos.D = 500
+    returnBodyPos.Position = Vector3.new(0, 50, 0) -- Return to Y=50 to avoid spawning in ground
+    returnBodyPos.Parent = rootPart
+    
+    -- Wait until we're close to spawn
+    task.spawn(function()
+        while rootPart and rootPart.Parent do
+            local distance = (rootPart.Position - Vector3.new(0, 50, 0)).Magnitude
+            
+            if distance < 10 then
+                -- We're at spawn, clean up
+                print("✓ Returned to spawn successfully")
+                if returnBodyPos and returnBodyPos.Parent then
+                    returnBodyPos:Destroy()
+                end
+                returningToSpawn = false
+                break
+            end
+            
+            task.wait(0.5)
+        end
+        
+        -- Failsafe cleanup
+        if returnBodyPos and returnBodyPos.Parent then
+            returnBodyPos:Destroy()
+        end
+        returningToSpawn = false
+    end)
+end
+
+-- ============================================
+-- MAIN HEARTBEAT LOOP
+-- ============================================
+
 -- Backup loop in case the event doesn't catch everything
 RunService.Heartbeat:Connect(function(dt)
     if LocalPlayer.Character then
         local humanoid = LocalPlayer.Character:FindFirstChild("Humanoid")
         local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        
+        -- ============================================
+        -- MAP BOUNDS CHECK (HIGHEST PRIORITY)
+        -- ============================================
+        if rootPart and MAP_BOUNDS_ENABLED and not returningToSpawn then
+            local myPosition = rootPart.Position
+            
+            -- Check if WE are out of bounds
+            if not isWithinMapBounds(myPosition) then
+                -- We're out of bounds! Return to spawn immediately
+                returnToSpawn()
+                return -- Skip all other processing
+            end
+        end
+        
+        -- If we're returning to spawn, skip all targeting/aura logic
+        if returningToSpawn then
+            return
+        end
+        
+        -- TARGET SYSTEM
+        if targetEnabled and rootPart then
+            -- AUTO TARGET MODE: Find closest player
+            if autoTargetEnabled then
+                local closestPlayer = nil
+                local closestDistance = math.huge
+                
+                -- Get PlayersInPlots folder reference
+                local playersInPlotsFolder = workspace:FindFirstChild("PlotItems")
+                if playersInPlotsFolder then
+                    playersInPlotsFolder = playersInPlotsFolder:FindFirstChild("PlayersInPlots")
+                end
+                
+                -- Find the closest player within range
+                for _, player in pairs(Players:GetPlayers()) do
+                    if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        local playerRoot = player.Character.HumanoidRootPart
+                        local distance = (playerRoot.Position - rootPart.Position).Magnitude
+                        
+                        -- CRITICAL: Check if player is within map bounds
+                        if MAP_BOUNDS_ENABLED and not isWithinMapBounds(playerRoot.Position) then
+                            -- Player is out of bounds (probably flung), skip them
+                            continue
+                        end
+                        
+                        -- CRITICAL: Skip players that are unreasonably far (probably flung)
+                        if distance > 10000 then
+                            -- Skip this player - they're too far away (probably flung)
+                            continue
+                        end
+                        
+                        -- Check if player is in a safe zone (PlayersInPlots folder)
+                        local inSafeZone = false
+                        if playersInPlotsFolder and player.Character.Parent == playersInPlotsFolder then
+                            inSafeZone = true
+                        end
+                        
+                        -- Check if within max distance, closer than current closest, and NOT in safe zone
+                        if distance <= TARGET_MAX_DISTANCE and distance < closestDistance and not inSafeZone then
+                            closestPlayer = player
+                            closestDistance = distance
+                        end
+                    end
+                end
+                
+                -- Update target to closest player
+                if closestPlayer and closestPlayer ~= targetPlayer then
+                    targetPlayer = closestPlayer
+                    print("🎯 Auto-targeting:", targetPlayer.Name, "| Distance:", math.floor(closestDistance), "studs")
+                elseif not closestPlayer then
+                    targetPlayer = nil
+                    if targetTween then
+                        targetTween:Cancel()
+                        targetTween = nil
+                    end
+                end
+            end
+            
+            -- MANUAL OR AUTO TARGET: Follow the selected player
+            if targetPlayer then
+                -- Check if target player still exists in game
+                if not targetPlayer.Parent then
+                    print("⚠️ Target player left the game")
+                    targetPlayer = nil
+                    
+                    -- Clean up BodyPosition
+                    if rootPart then
+                        local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                        if bodyPos then
+                            bodyPos:Destroy()
+                        end
+                    end
+                    
+                    if targetTween then
+                        targetTween:Cancel()
+                        targetTween = nil
+                    end
+                elseif targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                    local targetRoot = targetPlayer.Character.HumanoidRootPart
+                    local distance = (targetRoot.Position - rootPart.Position).Magnitude
+                
+                    -- PRIORITY CHECK: Is target outside map bounds?
+                    if MAP_BOUNDS_ENABLED and not isWithinMapBounds(targetRoot.Position) then
+                        print("⚠️ Target is outside map bounds (flung) - stopping follow")
+                        
+                        -- Clean up BodyPosition
+                        local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                        if bodyPos then
+                            bodyPos:Destroy()
+                        end
+                        
+                        if targetTween then
+                            targetTween:Cancel()
+                            targetTween = nil
+                        end
+                        
+                        -- In auto mode, find new target
+                        if autoTargetEnabled then
+                            targetPlayer = nil
+                        end
+                    else
+                        -- Target is within bounds, continue with normal checks
+                        
+                        -- Check if target is in a safe zone (Plot) - CHECK EVERY FRAME
+                        -- Simply check if their character is in the PlayersInPlots folder
+                        local targetInSafeZone = false
+                    local playersInPlotsFolder = workspace:FindFirstChild("PlotItems")
+                    if playersInPlotsFolder then
+                        playersInPlotsFolder = playersInPlotsFolder:FindFirstChild("PlayersInPlots")
+                    end
+                    
+                    if playersInPlotsFolder and targetPlayer.Character then
+                        -- Check if their character is in the PlayersInPlots folder
+                        if targetPlayer.Character.Parent == playersInPlotsFolder then
+                            targetInSafeZone = true
+                            -- Only print once per entry
+                            if not recentlyKilled[targetPlayer] or tick() - recentlyKilled[targetPlayer] > 2 then
+                                print("⚠️ Target", targetPlayer.Name, "is in safe zone (PlayersInPlots)")
+                                recentlyKilled[targetPlayer] = tick()
+                            end
+                        end
+                    end
+                    
+                    -- If target is in safe zone, IMMEDIATELY stop and clean up
+                    if targetInSafeZone then
+                        -- Clean up BodyPosition IMMEDIATELY
+                        local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                        if bodyPos then
+                            bodyPos:Destroy()
+                        end
+                        
+                        if targetTween then
+                            targetTween:Cancel()
+                            targetTween = nil
+                        end
+                        
+                        -- In auto mode, find new target. In manual mode, keep the target but don't follow
+                        if autoTargetEnabled then
+                            targetPlayer = nil
+                        end
+                        
+                        -- CRITICAL: Don't continue processing this frame
+                    elseif distance <= TARGET_MAX_DISTANCE then
+                        -- Check if WE are in a safe zone - if so, don't tween
+                        local weAreInSafeZone = false
+                        local playersInPlotsFolder = workspace:FindFirstChild("PlotItems")
+                        if playersInPlotsFolder then
+                            playersInPlotsFolder = playersInPlotsFolder:FindFirstChild("PlayersInPlots")
+                        end
+                        
+                        if playersInPlotsFolder and LocalPlayer.Character and LocalPlayer.Character.Parent == playersInPlotsFolder then
+                            weAreInSafeZone = true
+                        end
+                        
+                        -- Check if target is in safe zone (already checked above, but simplified here)
+                        local wouldEnterSafeZone = targetInSafeZone
+                        
+                        -- CRITICAL: Check if target is UNREASONABLY far away (prevents following flung players)
+                        -- If distance > 10000 studs, they're probably flung - don't follow
+                        if distance > 10000 then
+                            print("⚠️ Target too far away (", math.floor(distance), "studs) - probably flung. Stopping follow.")
+                            
+                            -- Clean up BodyPosition
+                            local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                            if bodyPos then
+                                bodyPos:Destroy()
+                            end
+                            
+                            if targetTween then
+                                targetTween:Cancel()
+                                targetTween = nil
+                            end
+                            
+                            -- In auto mode, clear target to find new one
+                            if autoTargetEnabled then
+                                targetPlayer = nil
+                            end
+                            
+                            return -- Stop processing
+                        end
+                        
+                        -- Don't tween if we're already in a safe zone OR if we'd enter one
+                        if weAreInSafeZone or wouldEnterSafeZone then
+                            -- Clean up any existing BodyPosition
+                            local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                            if bodyPos then
+                                bodyPos:Destroy()
+                            end
+                        else
+                            -- Safe to tween - check if we need to move closer
+                            if distance > TARGET_STOP_DISTANCE then
+                                -- Cancel existing tween if distance changed significantly
+                                if targetTween then
+                                    targetTween:Cancel()
+                                end
+                                
+                                -- Calculate tween time based on distance and speed
+                                local tweenTime = distance / TARGET_TWEEN_SPEED
+                                
+                                -- For vertical movement, we need to use BodyPosition or set PlatformStand
+                                -- Calculate target position in 3D
+                                local direction = (targetRoot.Position - rootPart.Position).Unit
+                                local targetPosition = targetRoot.Position - (direction * TARGET_STOP_DISTANCE)
+                                
+                                -- Use BodyPosition for 3D movement (works better than tweening CFrame)
+                                local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                                if not bodyPos then
+                                    bodyPos = Instance.new("BodyPosition")
+                                    bodyPos.Name = "TargetBodyPosition"
+                                    bodyPos.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+                                    bodyPos.P = 10000
+                                    bodyPos.Parent = rootPart
+                                end
+                                
+                                -- Set target position
+                                bodyPos.Position = targetPosition
+                                -- Adjust D (damping) based on speed - higher speed = less damping
+                                bodyPos.D = math.max(100, 1000 - (TARGET_TWEEN_SPEED * 5))
+                                
+                                -- Debug output every 2 seconds
+                                if tick() % 2 < 0.1 then
+                                    local modeText = autoTargetEnabled and "[AUTO]" or "[MANUAL]"
+                                    local verticalDiff = math.abs(targetRoot.Position.Y - rootPart.Position.Y)
+                                    print("🎯", modeText, "Following:", targetPlayer.Name, "| Distance:", math.floor(distance), "studs | Vertical:", math.floor(verticalDiff), "| Speed:", TARGET_TWEEN_SPEED, "studs/s")
+                                end
+                            else
+                                -- Within stop distance, remove BodyPosition
+                                local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                                if bodyPos then
+                                    bodyPos:Destroy()
+                                end
+                                
+                                if targetTween then
+                                    targetTween:Cancel()
+                                    targetTween = nil
+                                end
+                                
+                                -- Debug output
+                                if tick() % 2 < 0.1 then
+                                    local modeText = autoTargetEnabled and "[AUTO]" or "[MANUAL]"
+                                    print("✓", modeText, "At target position:", targetPlayer.Name, "| Distance:", math.floor(distance), "studs")
+                                end
+                            end
+                        end -- Close the safe zone else block
+                    else
+                        -- Out of range, remove BodyPosition
+                        local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                        if bodyPos then
+                            bodyPos:Destroy()
+                        end
+                        
+                        if targetTween then
+                            targetTween:Cancel()
+                            targetTween = nil
+                        end
+                        
+                        -- Debug output every 5 seconds
+                        if tick() % 5 < 0.1 then
+                            print("⚠️ Target out of range | Distance:", math.floor(distance), "studs | Max:", TARGET_MAX_DISTANCE)
+                        end
+                    end
+                    end -- Close the "target is within bounds" else block
+                end -- Close the elseif block
+            end -- Close the if targetPlayer block
+        else
+            -- Target disabled, make sure tween is cancelled and BodyPosition removed
+            if rootPart then
+                local bodyPos = rootPart:FindFirstChild("TargetBodyPosition")
+                if bodyPos then
+                    bodyPos:Destroy()
+                end
+            end
+            
+            if targetTween then
+                targetTween:Cancel()
+                targetTween = nil
+            end
+        end
         
         -- Walkspeed enforcement
         if customWalkspeedEnabled and humanoid and humanoid.WalkSpeed ~= walkspeedValue then
@@ -1185,9 +1861,9 @@ RunService.Heartbeat:Connect(function(dt)
         -- Anti-slide: Stop momentum when not moving
         if humanoid and rootPart and antiSlideEnabled and not airControlEnabled and not bhopEnabled then
             -- Check if player is not pressing any movement keys
-            local moveVector = humanoid.MoveVector
+            local moveDirection = humanoid.MoveDirection
             
-            if moveVector.Magnitude == 0 then
+            if moveDirection.Magnitude == 0 then
                 -- Player is not pressing any movement keys, kill horizontal velocity
                 local velocity = rootPart.Velocity
                 rootPart.Velocity = Vector3.new(0, velocity.Y, 0) -- Keep Y (jumping/falling) but zero out X and Z
@@ -1333,7 +2009,12 @@ local function killAuraTarget(rootPart)
     if not rootPart or rootPart.Anchored then return end
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
 
-    local originalCFrame = rootPart.CFrame
+    -- Get the character model
+    local character = rootPart.Parent
+    if not character then return end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    if not humanoid then return end
 
     -- Force network ownership
     local SetNetworkOwner = GrabEvents:FindFirstChild("SetNetworkOwner")
@@ -1341,48 +2022,99 @@ local function killAuraTarget(rootPart)
         SetNetworkOwner:FireServer(rootPart, rootPart.CFrame)
     end
 
-    -- Grab line (same logic as fling)
+    -- Create grab line to establish connection
     local myRoot = LocalPlayer.Character.HumanoidRootPart
     local offset = myRoot.CFrame:ToObjectSpace(rootPart.CFrame)
     CreateGrabLine:FireServer(rootPart, offset)
 
     -- Wait a moment for grab to register
-    task.wait(0.05)
+    task.wait(0.1)
 
-    -- Send to void (keep them there for the delay period)
-    local voidCFrame = CFrame.new(
-        originalCFrame.Position.X,
-        KILLAURA_VOID_Y,
-        originalCFrame.Position.Z
-    )
+    print("☠️ KillAura: EXTREME SLAMMING", character.Name, "through the ground...")
+    print("   Base Velocity:", KILLAURA_BASE_VELOCITY, "| Spike Velocity:", KILLAURA_SPIKE_VELOCITY)
     
-    -- Continuously force them into the void during the delay
+    -- METHOD: ABSOLUTELY INSANE VELOCITY to guarantee ground phasing
+    
     local startTime = tick()
-    local voidLoop = RunService.Heartbeat:Connect(function()
-        if tick() - startTime >= KILLAURA_DELAY then
-            return
-        end
-        
-        if rootPart and rootPart.Parent then
-            rootPart.CFrame = voidCFrame
-            rootPart.Velocity = Vector3.new(0, -100, 0) -- Force downward velocity
+    local slamCount = 0
+    local maxSlams = 100 -- More attempts
+    
+    local slamLoop = RunService.Heartbeat:Connect(function(deltaTime)
+        if rootPart and rootPart.Parent and rootPart.Anchored == false then
+            slamCount = slamCount + 1
+            
+            -- BASE VELOCITY: Use configurable value
+            local extremeVelocity = Vector3.new(0, -KILLAURA_BASE_VELOCITY, 0)
+            
+            rootPart.Velocity = extremeVelocity
+            rootPart.RotVelocity = Vector3.new(0, 0, 0)
+            
+            -- Also set Assembly velocities
+            pcall(function()
+                rootPart.AssemblyLinearVelocity = extremeVelocity
+                rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+            end)
+            
+            -- Every 5 frames, apply NUCLEAR velocity spike
+            if slamCount % 5 == 0 then
+                local nuclearVelocity = Vector3.new(0, -KILLAURA_SPIKE_VELOCITY, 0)
+                rootPart.Velocity = nuclearVelocity
+                pcall(function()
+                    rootPart.AssemblyLinearVelocity = nuclearVelocity
+                end)
+                print("💥💥💥 NUCLEAR SLAM #" .. math.floor(slamCount / 5) .. " - " .. KILLAURA_SPIKE_VELOCITY .. " velocity!")
+            end
+            
+            -- Check if they died or fell through
+            if not humanoid or humanoid.Health <= 0 or not character.Parent then
+                local timeElapsed = tick() - startTime
+                print("✓ KillAura: Target DIED after", math.floor(timeElapsed * 10) / 10, "seconds (" .. slamCount .. " slams)")
+                slamLoop:Disconnect()
+                
+                -- Destroy grab connection
+                local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
+                if DestroyGrabLine then
+                    DestroyGrabLine:FireServer(rootPart)
+                end
+                return
+            end
+            
+            -- Check if they phased through (Y position way below ground)
+            if rootPart.Position.Y < -100 then
+                print("✓ KillAura: Target PHASED through ground! Y=" .. math.floor(rootPart.Position.Y))
+            end
+            
+            -- Stop after max slams
+            if slamCount >= maxSlams then
+                print("⚠️ KillAura: Max slams reached (" .. maxSlams .. "), releasing grab")
+                slamLoop:Disconnect()
+                
+                local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
+                if DestroyGrabLine then
+                    DestroyGrabLine:FireServer(rootPart)
+                end
+            end
+        else
+            -- RootPart destroyed/removed or anchored
+            local timeElapsed = tick() - startTime
+            print("✓ KillAura: Target removed after", math.floor(timeElapsed * 10) / 10, "seconds")
+            slamLoop:Disconnect()
         end
     end)
-
-    -- Restore position and destroy grab after delay
-    task.delay(KILLAURA_DELAY, function()
-        if voidLoop then
-            voidLoop:Disconnect()
-        end
-        
-        if rootPart and rootPart.Parent then
-            rootPart.CFrame = originalCFrame
-        end
-        
-        -- Destroy the grab connection
-        local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
-        if DestroyGrabLine then
-            DestroyGrabLine:FireServer(rootPart)
+    
+    -- Backup timeout after 10 seconds (longer since we have more slams)
+    task.delay(10, function()
+        if slamLoop then
+            print("⚠️ KillAura: 10 second timeout reached, releasing grab")
+            slamLoop:Disconnect()
+            
+            -- Destroy grab connection
+            local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
+            if DestroyGrabLine then
+                pcall(function()
+                    DestroyGrabLine:FireServer(rootPart)
+                end)
+            end
         end
     end)
 end
@@ -1837,7 +2569,17 @@ createAura = function()
                 if humanoid and humanoid.Health > 0 and theirRoot then
                     local distance = (theirRoot.Position - myPos).Magnitude
                     
-                    if distance <= AURA_RADIUS then
+                    -- Check if player is in a safe zone (PlayersInPlots folder)
+                    local inSafeZone = false
+                    local playersInPlotsFolder = workspace:FindFirstChild("PlotItems")
+                    if playersInPlotsFolder then
+                        playersInPlotsFolder = playersInPlotsFolder:FindFirstChild("PlayersInPlots")
+                        if playersInPlotsFolder and player.Character.Parent == playersInPlotsFolder then
+                            inSafeZone = true
+                        end
+                    end
+                    
+                    if distance <= AURA_RADIUS and not inSafeZone then
                         if not recentlyFlung[player] or tick() - recentlyFlung[player] > 1 then
                             print("🎯 FLINGING Player:", player.Name)
                             recentlyFlung[player] = tick()
@@ -2069,7 +2811,18 @@ createKillAura = function()
     
                 if humanoid and humanoid.Health > 0 and root then
                     local distance = (root.Position - myPos).Magnitude
-                    if distance <= KILLAURA_RADIUS then
+                    
+                    -- Check if player is in a safe zone (PlayersInPlots folder)
+                    local inSafeZone = false
+                    local playersInPlotsFolder = workspace:FindFirstChild("PlotItems")
+                    if playersInPlotsFolder then
+                        playersInPlotsFolder = playersInPlotsFolder:FindFirstChild("PlayersInPlots")
+                        if playersInPlotsFolder and player.Character.Parent == playersInPlotsFolder then
+                            inSafeZone = true
+                        end
+                    end
+                    
+                    if distance <= KILLAURA_RADIUS and not inSafeZone then
                         if not recentlyKilled[player] or tick() - recentlyKilled[player] > 1 then
                             print("☠️ KILLING Player:", player.Name)
                             recentlyKilled[player] = tick()
