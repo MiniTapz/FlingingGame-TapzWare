@@ -65,8 +65,8 @@ local auraConnection = nil
 -- KillAura Settings (COMPLETELY SEPARATE)
 local killAuraEnabled = false
 local KILLAURA_RADIUS = 15
-local KILLAURA_VOID_Y = -100
-local KILLAURA_DELAY = 0.5
+local KILLAURA_VOID_Y = -500 -- Much deeper void
+local KILLAURA_DELAY = 1.5 -- Longer delay to ensure death
 local killAuraConnection = nil
 local recentlyKilled = {}
 
@@ -456,8 +456,8 @@ KillAuraSettingsSection:AddSlider({
     Name = "Void Y Position",
     Flag = "KillAuraVoidY",
     Value = -100,
-    Min = -500,
-    Max = -50,
+    Min = -1000,
+    Max = -100,
     Format = function(v)
         return "Void Y: " .. v
     end,
@@ -470,9 +470,9 @@ KillAuraSettingsSection:AddSlider({
 KillAuraSettingsSection:AddSlider({
     Name = "Kill Delay",
     Flag = "KillAuraDelay",
-    Value = 0.5,
-    Min = 0.1,
-    Max = 2,
+    Value = 1.5,
+    Min = 0.5,
+    Max = 5,
     Format = function(v)
         return "Delay: " .. v .. "s"
     end,
@@ -1320,6 +1320,12 @@ local function flingTarget(target)
         if bv and bv.Parent then
             bv:Destroy()
         end
+        
+        -- Destroy the grab connection
+        local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
+        if DestroyGrabLine then
+            DestroyGrabLine:FireServer(target)
+        end
     end)
 end
 
@@ -1340,17 +1346,43 @@ local function killAuraTarget(rootPart)
     local offset = myRoot.CFrame:ToObjectSpace(rootPart.CFrame)
     CreateGrabLine:FireServer(rootPart, offset)
 
-    -- Send to void
-    rootPart.CFrame = CFrame.new(
+    -- Wait a moment for grab to register
+    task.wait(0.05)
+
+    -- Send to void (keep them there for the delay period)
+    local voidCFrame = CFrame.new(
         originalCFrame.Position.X,
         KILLAURA_VOID_Y,
         originalCFrame.Position.Z
     )
+    
+    -- Continuously force them into the void during the delay
+    local startTime = tick()
+    local voidLoop = RunService.Heartbeat:Connect(function()
+        if tick() - startTime >= KILLAURA_DELAY then
+            return
+        end
+        
+        if rootPart and rootPart.Parent then
+            rootPart.CFrame = voidCFrame
+            rootPart.Velocity = Vector3.new(0, -100, 0) -- Force downward velocity
+        end
+    end)
 
-    -- Restore position
+    -- Restore position and destroy grab after delay
     task.delay(KILLAURA_DELAY, function()
+        if voidLoop then
+            voidLoop:Disconnect()
+        end
+        
         if rootPart and rootPart.Parent then
             rootPart.CFrame = originalCFrame
+        end
+        
+        -- Destroy the grab connection
+        local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
+        if DestroyGrabLine then
+            DestroyGrabLine:FireServer(rootPart)
         end
     end)
 end
