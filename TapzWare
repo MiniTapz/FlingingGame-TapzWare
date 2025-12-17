@@ -42,7 +42,7 @@ LocalPlayer.CameraMinZoomDistance = 12 -- Set to 12 first to force third person
 task.wait(0.1) -- Brief delay
 LocalPlayer.CameraMinZoomDistance = 0.5 -- Then back to 0.5 to allow full zoom
 
--- Settings
+-- Fling Settings
 local FLING_POWER = 500
 local instantFlingEnabled = false
 local auraEnabled = false
@@ -61,6 +61,25 @@ local currentRotation = 0
 -- Aura system variables (declared early to prevent nil errors)
 local auraRingParts = {}
 local auraConnection = nil
+
+-- KillAura Settings (COMPLETELY SEPARATE)
+local killAuraEnabled = false
+local KILLAURA_RADIUS = 15
+local KILLAURA_VOID_Y = -100
+local KILLAURA_DELAY = 0.5
+local killAuraConnection = nil
+local recentlyKilled = {}
+
+-- KillAura visualization settings
+local showKillAuraVisualization = true
+local killAuraRingColor = Color3.fromRGB(255, 0, 0)
+local killAuraRingThickness = 0.5
+local killAuraRingHeight = 0.3
+local killAuraRingSpin = false
+local killAuraSpinSpeed = 1
+local killAuraRingStyle = "dots"
+local killAuraCurrentRotation = 0
+local killAuraRingParts = {}
 
 -- Walkspeed variables
 local customWalkspeedEnabled = false
@@ -134,10 +153,18 @@ local updateAuraRing = function() end
 local createAuraRing = function() end
 local createAura = function() end
 local destroyAura = function() end
+local updateKillAuraRing = function() end
+local createKillAuraRing = function() end
+local createKillAura = function() end
+local destroyKillAura = function() end
 
 -- Create Tabs
 local FlingTab = FlingWindow:CreateTab({
     Name = "Fling"
+})
+
+local KillAuraTab = FlingWindow:CreateTab({
+    Name = "KillAura"
 })
 
 local PlayerTab = FlingWindow:CreateTab({
@@ -201,12 +228,12 @@ FlingSettingsSection:AddSlider({
     end,
     Callback = function(value)
         AURA_RADIUS = value
-        print("Aura Radius set to:", value)
+        print("Fling Aura Radius set to:", value)
         
         -- Update aura visual immediately if it exists
         if auraRingParts and #auraRingParts > 0 then
             updateAuraRing()
-            print("✓ Aura ring updated!")
+            print("✓ Fling aura ring updated!")
         end
     end
 })
@@ -244,7 +271,7 @@ AuraVisualSection:AddToggle({
             if auraEnabled then
                 createAuraRing()
             end
-            print("✓ Aura visualization ENABLED")
+            print("✓ Fling aura visualization ENABLED")
         else
             -- Hide the ring
             for _, part in pairs(auraRingParts) do
@@ -253,7 +280,7 @@ AuraVisualSection:AddToggle({
                 end
             end
             auraRingParts = {}
-            print("✗ Aura visualization DISABLED")
+            print("✗ Fling aura visualization DISABLED")
         end
     end
 })
@@ -264,7 +291,7 @@ AuraVisualSection:AddColorpicker({
     Value = Color3.fromRGB(255, 0, 127),
     Callback = function(value)
         auraRingColor = value
-        print("Ring color changed to:", value)
+        print("Fling ring color changed to:", value)
         
         -- Update ring color immediately
         if auraRingParts and #auraRingParts > 0 then
@@ -273,12 +300,10 @@ AuraVisualSection:AddColorpicker({
                     part.Color = value
                 end
             end
-            print("✓ Ring color updated!")
+            print("✓ Fling ring color updated!")
         end
     end
 })
-
-print("DEBUG: Ring Thickness slider starting...")
 
 AuraVisualSection:AddSlider({
     Name = "Ring Thickness",
@@ -291,19 +316,15 @@ AuraVisualSection:AddSlider({
     end,
     Callback = function(value)
         auraRingThickness = value
-        print("Ring thickness set to:", value)
+        print("Fling ring thickness set to:", value)
         
         -- Update ring immediately
         if auraRingParts and #auraRingParts > 0 then
             updateAuraRing()
-            print("✓ Ring thickness updated!")
+            print("✓ Fling ring thickness updated!")
         end
     end
 })
-
-print("DEBUG: Ring Height slider starting...")
-
-print("DEBUG: Ring Height slider starting...")
 
 AuraVisualSection:AddSlider({
     Name = "Ring Height",
@@ -316,17 +337,15 @@ AuraVisualSection:AddSlider({
     end,
     Callback = function(value)
         auraRingHeight = value
-        print("Ring height set to:", value)
+        print("Fling ring height set to:", value)
         
         -- Update ring immediately
         if auraRingParts and #auraRingParts > 0 then
             updateAuraRing()
-            print("✓ Ring height updated!")
+            print("✓ Fling ring height updated!")
         end
     end
 })
-
-print("DEBUG: Aura visualization section complete!")
 
 -- Ring Animation Section
 local RingAnimationSection = FlingTab:CreateSection({
@@ -341,9 +360,9 @@ RingAnimationSection:AddToggle({
     Callback = function(value)
         auraRingSpin = value
         if value then
-            print("✓ Ring spinning ENABLED")
+            print("✓ Fling ring spinning ENABLED")
         else
-            print("✗ Ring spinning DISABLED")
+            print("✗ Fling ring spinning DISABLED")
             currentRotation = 0 -- Reset rotation
         end
     end
@@ -360,7 +379,7 @@ RingAnimationSection:AddSlider({
     end,
     Callback = function(value)
         auraSpinSpeed = value
-        print("Spin speed set to:", value .. "x")
+        print("Fling spin speed set to:", value .. "x")
     end
 })
 
@@ -373,18 +392,240 @@ RingAnimationSection:AddDropdown({
         local newStyle = value:lower()
         if newStyle ~= auraRingStyle then
             auraRingStyle = newStyle
-            print("Ring style changed to:", value)
+            print("Fling ring style changed to:", value)
             
             -- Recreate ring with new style if it exists
             if auraRingParts and #auraRingParts > 0 and showAuraVisualization then
                 createAuraRing()
-                print("✓ Ring recreated with new style!")
+                print("✓ Fling ring recreated with new style!")
             end
         end
     end
 })
 
 -- ============================================
+-- KILLAURA TAB (COMPLETELY SEPARATE)
+-- ============================================
+local KillAuraSection = KillAuraTab:CreateSection({
+    Name = "KillAura Options"
+})
+
+KillAuraSection:AddToggle({
+    Name = "Enable KillAura",
+    Flag = "KillAura",
+    Callback = function(value)
+        killAuraEnabled = value
+        if value then
+            print("☠️ KillAura ENABLED")
+            createKillAura()
+        else
+            print("✗ KillAura DISABLED")
+            destroyKillAura()
+        end
+    end
+})
+
+-- KillAura Settings Section
+local KillAuraSettingsSection = KillAuraTab:CreateSection({
+    Name = "Settings",
+    Side = "Right"
+})
+
+KillAuraSettingsSection:AddSlider({
+    Name = "KillAura Radius",
+    Flag = "KillAuraRadius",
+    Value = 15,
+    Min = 5,
+    Max = 50,
+    Format = function(v)
+        return "Radius: " .. v
+    end,
+    Callback = function(v)
+        KILLAURA_RADIUS = v
+        print("KillAura Radius set to:", v)
+        
+        -- Update visual if it exists
+        if killAuraRingParts and #killAuraRingParts > 0 then
+            updateKillAuraRing()
+            print("✓ KillAura ring updated!")
+        end
+    end
+})
+
+KillAuraSettingsSection:AddSlider({
+    Name = "Void Y Position",
+    Flag = "KillAuraVoidY",
+    Value = -100,
+    Min = -500,
+    Max = -50,
+    Format = function(v)
+        return "Void Y: " .. v
+    end,
+    Callback = function(v)
+        KILLAURA_VOID_Y = v
+        print("KillAura Void Y set to:", v)
+    end
+})
+
+KillAuraSettingsSection:AddSlider({
+    Name = "Kill Delay",
+    Flag = "KillAuraDelay",
+    Value = 0.5,
+    Min = 0.1,
+    Max = 2,
+    Format = function(v)
+        return "Delay: " .. v .. "s"
+    end,
+    Callback = function(v)
+        KILLAURA_DELAY = v
+        print("KillAura Delay set to:", v .. "s")
+    end
+})
+
+-- KillAura Visualization Section
+local KillAuraVisualSection = KillAuraTab:CreateSection({
+    Name = "Visualization",
+    Side = "Right"
+})
+
+KillAuraVisualSection:AddToggle({
+    Name = "Show KillAura Ring",
+    Flag = "ShowKillAuraVisualization",
+    Value = true,
+    Callback = function(value)
+        showKillAuraVisualization = value
+        
+        if value then
+            if killAuraEnabled then
+                createKillAuraRing()
+            end
+            print("✓ KillAura visualization ENABLED")
+        else
+            for _, part in pairs(killAuraRingParts) do
+                if part then
+                    part:Destroy()
+                end
+            end
+            killAuraRingParts = {}
+            print("✗ KillAura visualization DISABLED")
+        end
+    end
+})
+
+KillAuraVisualSection:AddColorpicker({
+    Name = "Ring Color",
+    Flag = "KillAuraRingColor",
+    Value = Color3.fromRGB(255, 0, 0),
+    Callback = function(value)
+        killAuraRingColor = value
+        print("KillAura ring color changed to:", value)
+        
+        if killAuraRingParts and #killAuraRingParts > 0 then
+            for _, part in pairs(killAuraRingParts) do
+                if part then
+                    part.Color = value
+                end
+            end
+            print("✓ KillAura ring color updated!")
+        end
+    end
+})
+
+KillAuraVisualSection:AddSlider({
+    Name = "Ring Thickness",
+    Flag = "KillAuraRingThickness",
+    Value = 0.5,
+    Min = 0.1,
+    Max = 2,
+    Format = function(Value)
+        return "Thickness: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        killAuraRingThickness = value
+        print("KillAura ring thickness set to:", value)
+        
+        if killAuraRingParts and #killAuraRingParts > 0 then
+            updateKillAuraRing()
+            print("✓ KillAura ring thickness updated!")
+        end
+    end
+})
+
+KillAuraVisualSection:AddSlider({
+    Name = "Ring Height",
+    Flag = "KillAuraRingHeight",
+    Value = 0.3,
+    Min = 0.1,
+    Max = 2,
+    Format = function(Value)
+        return "Height: " .. tostring(Value)
+    end,
+    Callback = function(value)
+        killAuraRingHeight = value
+        print("KillAura ring height set to:", value)
+        
+        if killAuraRingParts and #killAuraRingParts > 0 then
+            updateKillAuraRing()
+            print("✓ KillAura ring height updated!")
+        end
+    end
+})
+
+-- KillAura Ring Animation Section
+local KillAuraAnimationSection = KillAuraTab:CreateSection({
+    Name = "Ring Animation",
+    Side = "Right"
+})
+
+KillAuraAnimationSection:AddToggle({
+    Name = "Spin Ring",
+    Flag = "KillAuraSpinRing",
+    Value = false,
+    Callback = function(value)
+        killAuraRingSpin = value
+        if value then
+            print("✓ KillAura ring spinning ENABLED")
+        else
+            print("✗ KillAura ring spinning DISABLED")
+            killAuraCurrentRotation = 0
+        end
+    end
+})
+
+KillAuraAnimationSection:AddSlider({
+    Name = "Spin Speed",
+    Flag = "KillAuraSpinSpeed",
+    Value = 1,
+    Min = 0.1,
+    Max = 5,
+    Format = function(Value)
+        return "Speed: " .. tostring(Value) .. "x"
+    end,
+    Callback = function(value)
+        killAuraSpinSpeed = value
+        print("KillAura spin speed set to:", value .. "x")
+    end
+})
+
+KillAuraAnimationSection:AddDropdown({
+    Name = "Ring Style",
+    Flag = "KillAuraRingStyle",
+    List = {"Dots", "Solid"},
+    Default = "Dots",
+    Callback = function(value)
+        local newStyle = value:lower()
+        if newStyle ~= killAuraRingStyle then
+            killAuraRingStyle = newStyle
+            print("KillAura ring style changed to:", value)
+            
+            if killAuraRingParts and #killAuraRingParts > 0 and showKillAuraVisualization then
+                createKillAuraRing()
+                print("✓ KillAura ring recreated with new style!")
+            end
+        end
+    end
+})
+
 -- ============================================
 -- PLAYER TAB
 -- ============================================
@@ -1082,6 +1323,38 @@ local function flingTarget(target)
     end)
 end
 
+local function killAuraTarget(rootPart)
+    if not rootPart or rootPart.Anchored then return end
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+
+    local originalCFrame = rootPart.CFrame
+
+    -- Force network ownership
+    local SetNetworkOwner = GrabEvents:FindFirstChild("SetNetworkOwner")
+    if SetNetworkOwner then
+        SetNetworkOwner:FireServer(rootPart, rootPart.CFrame)
+    end
+
+    -- Grab line (same logic as fling)
+    local myRoot = LocalPlayer.Character.HumanoidRootPart
+    local offset = myRoot.CFrame:ToObjectSpace(rootPart.CFrame)
+    CreateGrabLine:FireServer(rootPart, offset)
+
+    -- Send to void
+    rootPart.CFrame = CFrame.new(
+        originalCFrame.Position.X,
+        KILLAURA_VOID_Y,
+        originalCFrame.Position.Z
+    )
+
+    -- Restore position
+    task.delay(KILLAURA_DELAY, function()
+        if rootPart and rootPart.Parent then
+            rootPart.CFrame = originalCFrame
+        end
+    end)
+end
+
 -- ============================================
 -- ESP FUNCTIONS
 -- ============================================
@@ -1370,10 +1643,10 @@ RunService.RenderStepped:Connect(function()
 end)
 
 -- ============================================
--- AURA FUNCTIONS
+-- FLING AURA FUNCTIONS
 -- ============================================
 
--- Function to create the aura ring
+-- Function to create the fling aura ring
 createAuraRing = function()
     -- Destroy old ring parts
     for _, part in pairs(auraRingParts) do
@@ -1390,12 +1663,12 @@ createAuraRing = function()
     repeat task.wait() until LocalPlayer.Character
     repeat task.wait() until LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     
-    print("Creating aura ring...")
+    print("Creating fling aura ring...")
     
     if auraRingStyle == "solid" then
         -- Create a solid torus (donut shape) using a Part with a special mesh
         local solidRing = Instance.new("Part")
-        solidRing.Name = "AuraRingSegment"
+        solidRing.Name = "FlingAuraRingSegment"
         solidRing.Shape = Enum.PartType.Ball
         solidRing.Size = Vector3.new(1, 1, 1)
         solidRing.Transparency = 0.3
@@ -1414,7 +1687,7 @@ createAuraRing = function()
         mesh.Parent = solidRing
         
         table.insert(auraRingParts, solidRing)
-        print("✓ Solid aura ring created!")
+        print("✓ Solid fling aura ring created!")
     else
         -- Create ring using multiple cylinder parts arranged in a circle (dots style)
         local numSegments = 36
@@ -1423,7 +1696,7 @@ createAuraRing = function()
         for i = 1, numSegments do
             local angle = segmentAngle * i
             local segment = Instance.new("Part")
-            segment.Name = "AuraRingSegment"
+            segment.Name = "FlingAuraRingSegment"
             segment.Shape = Enum.PartType.Cylinder
             segment.Size = Vector3.new(auraRingHeight, auraRingThickness, auraRingThickness)
             segment.Transparency = 0.3
@@ -1436,28 +1709,23 @@ createAuraRing = function()
             
             table.insert(auraRingParts, segment)
         end
-        print("✓ Aura ring created with", #auraRingParts, "segments! Style: dots")
+        print("✓ Fling aura ring created with", #auraRingParts, "segments! Style: dots")
     end
 end
 
--- Function to update aura ring position and size
+-- Function to update fling aura ring position and size
 updateAuraRing = function()
     if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        print("DEBUG: updateAuraRing - No character/root")
         return
     end
     
     if not showAuraVisualization then
-        print("DEBUG: updateAuraRing - Visualization disabled")
         return
     end
     
     if #auraRingParts == 0 then
-        print("DEBUG: updateAuraRing - No ring parts exist")
         return
     end
-    
-    print("DEBUG: Updating", #auraRingParts, "ring segments with radius", AURA_RADIUS)
     
     -- Update rotation if spinning is enabled
     if auraRingSpin then
@@ -1501,15 +1769,13 @@ updateAuraRing = function()
             end
         end
     end
-    
-    print("DEBUG: Ring update complete!")
 end
 
--- Function to create the aura
+-- Function to create the fling aura
 createAura = function()
     createAuraRing()
     
-    print("Creating aura scanning system...")
+    print("Creating fling aura scanning system...")
     
     -- Active scanning
     local lastCheck = 0
@@ -1562,7 +1828,7 @@ createAura = function()
                 end
             end
         end
-        
+
         -- Check for parts
         local region = Region3.new(myPos - Vector3.new(AURA_RADIUS, AURA_RADIUS, AURA_RADIUS), 
                                     myPos + Vector3.new(AURA_RADIUS, AURA_RADIUS, AURA_RADIUS))
@@ -1572,7 +1838,7 @@ createAura = function()
         
         for _, part in pairs(parts) do
             if part:IsA("BasePart") and not part.Anchored then
-                if not part:IsDescendantOf(LocalPlayer.Character) and part.Name ~= "AuraRingSegment" then
+                if not part:IsDescendantOf(LocalPlayer.Character) and not part.Name:match("AuraRing") then
                     local partDistance = (part.Position - myPos).Magnitude
                     
                     if partDistance <= AURA_RADIUS then
@@ -1601,7 +1867,7 @@ createAura = function()
     end)
 end
 
--- Function to destroy the aura
+-- Function to destroy the fling aura
 destroyAura = function()
     for _, part in pairs(auraRingParts) do
         if part then
@@ -1614,7 +1880,193 @@ destroyAura = function()
         auraConnection:Disconnect()
         auraConnection = nil
     end
-    print("✗ Aura destroyed")
+    print("✗ Fling Aura destroyed")
+end
+
+-- ============================================
+-- KILLAURA FUNCTIONS (COMPLETELY SEPARATE)
+-- ============================================
+
+-- Function to create the KillAura ring
+createKillAuraRing = function()
+    -- Destroy old ring parts
+    for _, part in pairs(killAuraRingParts) do
+        if part then
+            part:Destroy()
+        end
+    end
+    killAuraRingParts = {}
+    
+    if not showKillAuraVisualization then
+        return
+    end
+    
+    repeat task.wait() until LocalPlayer.Character
+    repeat task.wait() until LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    
+    print("Creating KillAura ring...")
+    
+    if killAuraRingStyle == "solid" then
+        local solidRing = Instance.new("Part")
+        solidRing.Name = "KillAuraRingSegment"
+        solidRing.Shape = Enum.PartType.Ball
+        solidRing.Size = Vector3.new(1, 1, 1)
+        solidRing.Transparency = 0.3
+        solidRing.Color = killAuraRingColor
+        solidRing.Material = Enum.Material.Neon
+        solidRing.CanCollide = false
+        solidRing.Anchored = true
+        solidRing.CastShadow = false
+        solidRing.Parent = workspace
+        
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.FileMesh
+        mesh.MeshId = "rbxassetid://3270017"
+        mesh.Scale = Vector3.new(KILLAURA_RADIUS * 0.4, killAuraRingThickness, KILLAURA_RADIUS * 0.4)
+        mesh.Parent = solidRing
+        
+        table.insert(killAuraRingParts, solidRing)
+        print("✓ Solid KillAura ring created!")
+    else
+        local numSegments = 36
+        local segmentAngle = (math.pi * 2) / numSegments
+        
+        for i = 1, numSegments do
+            local angle = segmentAngle * i
+            local segment = Instance.new("Part")
+            segment.Name = "KillAuraRingSegment"
+            segment.Shape = Enum.PartType.Cylinder
+            segment.Size = Vector3.new(killAuraRingHeight, killAuraRingThickness, killAuraRingThickness)
+            segment.Transparency = 0.3
+            segment.Color = killAuraRingColor
+            segment.Material = Enum.Material.Neon
+            segment.CanCollide = false
+            segment.Anchored = true
+            segment.CastShadow = false
+            segment.Parent = workspace
+            
+            table.insert(killAuraRingParts, segment)
+        end
+        print("✓ KillAura ring created with", #killAuraRingParts, "segments! Style: dots")
+    end
+end
+
+-- Function to update KillAura ring position and size
+updateKillAuraRing = function()
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return
+    end
+    
+    if not showKillAuraVisualization then
+        return
+    end
+    
+    if #killAuraRingParts == 0 then
+        return
+    end
+    
+    -- Update rotation if spinning is enabled
+    if killAuraRingSpin then
+        killAuraCurrentRotation = killAuraCurrentRotation + (0.02 * killAuraSpinSpeed)
+        if killAuraCurrentRotation >= math.pi * 2 then
+            killAuraCurrentRotation = 0
+        end
+    end
+    
+    local rootPart = LocalPlayer.Character.HumanoidRootPart
+    local position = rootPart.Position - Vector3.new(0, rootPart.Size.Y / 2 + 2, 0)
+    
+    local numSegments = #killAuraRingParts
+    local segmentAngle = (math.pi * 2) / numSegments
+    
+    if killAuraRingStyle == "solid" then
+        local solidRing = killAuraRingParts[1]
+        if solidRing then
+            solidRing.CFrame = CFrame.new(position) * CFrame.Angles(0, killAuraCurrentRotation, 0)
+            solidRing.Color = killAuraRingColor
+            
+            local mesh = solidRing:FindFirstChildOfClass("SpecialMesh")
+            if mesh then
+                mesh.Scale = Vector3.new(KILLAURA_RADIUS * 0.4, killAuraRingThickness, KILLAURA_RADIUS * 0.4)
+            end
+        end
+    else
+        for i, segment in pairs(killAuraRingParts) do
+            if segment then
+                local angle = segmentAngle * i + killAuraCurrentRotation
+                local x = math.cos(angle) * KILLAURA_RADIUS
+                local z = math.sin(angle) * KILLAURA_RADIUS
+                
+                local segmentPos = position + Vector3.new(x, 0, z)
+                segment.CFrame = CFrame.new(segmentPos) * CFrame.Angles(0, angle, math.rad(90))
+                segment.Size = Vector3.new(killAuraRingHeight, killAuraRingThickness, killAuraRingThickness)
+                segment.Color = killAuraRingColor
+            end
+        end
+    end
+end
+
+-- Function to create the KillAura
+createKillAura = function()
+    createKillAuraRing()
+    
+    print("Creating KillAura scanning system...")
+    
+    local lastCheck = 0
+    
+    killAuraConnection = RunService.RenderStepped:Connect(function()
+        if not killAuraEnabled then return end
+        
+        if tick() - lastCheck < 0.2 then 
+            updateKillAuraRing()
+            return 
+        end
+        lastCheck = tick()
+        
+        if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            return
+        end
+        
+        local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+        
+        -- KillAura player check
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local humanoid = player.Character:FindFirstChild("Humanoid")
+                local root = player.Character:FindFirstChild("HumanoidRootPart")
+    
+                if humanoid and humanoid.Health > 0 and root then
+                    local distance = (root.Position - myPos).Magnitude
+                    if distance <= KILLAURA_RADIUS then
+                        if not recentlyKilled[player] or tick() - recentlyKilled[player] > 1 then
+                            print("☠️ KILLING Player:", player.Name)
+                            recentlyKilled[player] = tick()
+                            killAuraTarget(root)
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Update KillAura ring position
+        updateKillAuraRing()
+    end)
+end
+
+-- Function to destroy the KillAura
+destroyKillAura = function()
+    for _, part in pairs(killAuraRingParts) do
+        if part then
+            part:Destroy()
+        end
+    end
+    killAuraRingParts = {}
+    
+    if killAuraConnection then
+        killAuraConnection:Disconnect()
+        killAuraConnection = nil
+    end
+    print("✗ KillAura destroyed")
 end
 
 -- Listen for instant fling (manual grabs)
@@ -1641,3 +2093,8 @@ CreateGrabLine.OnClientEvent:Connect(function(player, grabbedPart, offset)
         flingTarget(grabbedPart)
     end
 end)
+
+print("═══════════════════════════════════════")
+print("🎯 FLING SCRIPT LOADED")
+print("UI Library Loaded Successfully")
+print("═══════════════════════════════════════")
