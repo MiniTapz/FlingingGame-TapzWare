@@ -444,7 +444,7 @@ FlingSettingsSection:AddSlider({
     Flag = "FlingPower",
     Value = 500,
     Min = 100,
-    Max = 10000,
+    Max = 100000,
     Format = function(Value)
         return "Power: " .. tostring(Value)
     end,
