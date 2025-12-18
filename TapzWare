@@ -1,13 +1,3 @@
--- ============================================
--- FLING SCRIPT WITH UI LIBRARY
--- ============================================
--- IMPORTANT: This MUST be executed as a LocalScript!
--- Place in: StarterPlayer > StarterPlayerScripts
--- Or execute via: Executor (Synapse, KRNL, etc.)
--- ============================================
-
-print("=== SCRIPT STARTING ===")
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -63,6 +53,195 @@ local MAP_BOUNDS_ENABLED = true
 local MAP_BOUNDS_CENTER = Vector3.new(27.173, 119.848, 50.196)
 local MAP_BOUNDS_SIZE = Vector3.new(1433.347, 739.603, 1488.309)
 local returningToSpawn = false
+
+-- Auto Trash Talk System
+local trashTalkEnabled = false
+local trashTalkOnKill = true
+local trashTalkOnFling = true
+local trashTalkDelay = 3 -- Seconds between messages
+
+-- Auto Spam Trash Talk (independent system)
+local autoSpamTrashTalk = false
+local autoSpamFrequency = 5 -- Seconds between auto messages
+local lastAutoSpam = 0
+
+local trashTalkMessages = {
+    -- Kill messages (Roblox-safe, no harsh language)
+    kill = {
+        "gg #TapzWare!",
+        "ez win #TapzWare!",
+        "outplayed #TapzWare!",
+        "too quick #TapzWare!",
+        "better luck next time #TapzWare!",
+        "gg wp #TapzWare!",
+        "nice try #TapzWare!",
+        "almost had me #TapzWare!",
+        "got you #TapzWare!",
+        "rekt #TapzWare!",
+        "clapped #TapzWare!",
+        "demolished #TapzWare!",
+        "dominated #TapzWare!",
+        "not even close #TapzWare!",
+        "that was fast #TapzWare!",
+        "wp to me #TapzWare!",
+        "gg2ez #TapzWare!",
+        "simply better #TapzWare!",
+        "different league #TapzWare!",
+        "skill gap #TapzWare!",
+        "you tried your best #TapzWare!",
+        "gg no re #TapzWare!",
+        "sent #TapzWare!",
+        "handled #TapzWare!",
+        "wrapped up #TapzWare!"
+    },
+    -- Fling messages  
+    fling = {
+        "enjoy the flight #TapzWare!",
+        "bon voyage #TapzWare!",
+        "see you in orbit #TapzWare!",
+        "fly high #TapzWare!",
+        "to the moon #TapzWare!",
+        "launched #TapzWare!",
+        "blasted off #TapzWare!",
+        "yeet #TapzWare!",
+        "sent to space #TapzWare!",
+        "flying lesson #TapzWare!",
+        "farewell #TapzWare!",
+        "have a nice trip #TapzWare!",
+        "airmail #TapzWare!",
+        "package delivered #TapzWare!",
+        "express shipping #TapzWare!",
+        "gone #TapzWare!",
+        "blast off #TapzWare!",
+        "rocket launch #TapzWare!",
+        "up up and away #TapzWare!",
+        "enjoy zero gravity #TapzWare!"
+    },
+    -- Auto spam messages (general trash talk, Roblox-safe)
+    spam = {
+        -- TapzWare promotion messages
+        "#TapzWare on top!",
+        "#TapzWare for the win!",
+        "#TapzWare undefeated!",
+        "powered by #TapzWare!",
+        "#TapzWare supremacy!",
+        "running #TapzWare!",
+        "#TapzWare built different!",
+        "get #TapzWare!",
+        "#TapzWare domination!",
+        "#TapzWare ftw!",
+        
+        -- Skill-based (safe)
+        "too easy #TapzWare!",
+        "built different #TapzWare!",
+        "simply better #TapzWare!",
+        "not even close #TapzWare!",
+        "different level #TapzWare!",
+        "skill gap real #TapzWare!",
+        "untouchable #TapzWare!",
+        "unbeatable #TapzWare!",
+        "unstoppable force #TapzWare!",
+        "cant be stopped #TapzWare!",
+        "on another level #TapzWare!",
+        "too strong #TapzWare!",
+        "just warming up #TapzWare!",
+        "havent even tried yet #TapzWare!",
+        "this is light work #TapzWare!",
+        
+        -- Competitive (safe)
+        "gg ez #TapzWare!",
+        "gg wp #TapzWare!",
+        "gg no re #TapzWare!",
+        "good game #TapzWare!",
+        "too quick #TapzWare!",
+        "speed demon #TapzWare!",
+        "lightning fast #TapzWare!",
+        "quick work #TapzWare!",
+        
+        -- Confident (safe)
+        "this is my game #TapzWare!",
+        "this is my lobby #TapzWare!",
+        "i own this server #TapzWare!",
+        "king of the server #TapzWare!",
+        "nobody can stop me #TapzWare!",
+        "unmatched #TapzWare!",
+        "peak performance #TapzWare!",
+        "at my best #TapzWare!",
+        "in my zone #TapzWare!",
+        "locked in #TapzWare!",
+        
+        -- Playful (safe)
+        "yall done yet? #TapzWare!",
+        "anyone else? #TapzWare!",
+        "whos next? #TapzWare!",
+        "bring it on #TapzWare!",
+        "is that all? #TapzWare!",
+        "barely broke a sweat #TapzWare!",
+        "warm up complete #TapzWare!",
+        "stretching done #TapzWare!",
+        "now its getting fun #TapzWare!",
+        
+        -- Motivational/Backhanded (safe)
+        "nice try yall #TapzWare!",
+        "better luck next time #TapzWare!",
+        "you almost had it #TapzWare!",
+        "so close #TapzWare!",
+        "good attempt #TapzWare!",
+        "keep trying #TapzWare!",
+        "practice makes perfect #TapzWare!",
+        "youll get there #TapzWare!",
+        
+        -- Simple flex (safe)
+        "W #TapzWare!",
+        "huge W #TapzWare!",
+        "massive W #TapzWare!",
+        "clean #TapzWare!",
+        "smooth #TapzWare!",
+        "perfect #TapzWare!",
+        "flawless #TapzWare!",
+        "immaculate #TapzWare!",
+        "pristine #TapzWare!",
+        
+        -- Domination (safe)
+        "dominating #TapzWare!",
+        "on fire #TapzWare!",
+        "unstoppable #TapzWare!",
+        "on a streak #TapzWare!",
+        "cant miss #TapzWare!",
+        "perfect game #TapzWare!",
+        "not losing today #TapzWare!",
+        "undefeated #TapzWare!",
+        
+        -- Questions (safe, rhetorical)
+        "too easy? #TapzWare!",
+        "whos better? #TapzWare!",
+        "anyone close? #TapzWare!",
+        "any competition? #TapzWare!",
+        "where the challenge? #TapzWare!",
+        
+        -- Game-specific (safe)
+        "cleaned up #TapzWare!",
+        "wiped the floor #TapzWare!",
+        "swept the lobby #TapzWare!",
+        "ran through yall #TapzWare!",
+        "no contest #TapzWare!",
+        "no competition #TapzWare!",
+        "solo carry #TapzWare!",
+        "1v everyone #TapzWare!",
+        
+        -- Casual flex (safe)
+        "yawn #TapzWare!",
+        "casual day #TapzWare!",
+        "just another win #TapzWare!",
+        "routine victory #TapzWare!",
+        "easy mode #TapzWare!",
+        "tutorial difficulty #TapzWare!",
+        "practice lobby #TapzWare!",
+        "warmup game #TapzWare!"
+    }
+}
+
+local lastTrashTalk = 0
 
 -- Aura visualization settings
 local showAuraVisualization = true
@@ -535,8 +714,8 @@ TargetSettingsSection:AddSlider({
 TargetSettingsSection:AddSlider({
     Name = "Stop Distance",
     Flag = "TargetStopDistance",
-    Value = 25,
-    Min = 10,
+    Value = 1,
+    Min = 1,
     Max = 100,
     Format = function(Value)
         return "Stop: " .. tostring(Value) .. " studs"
@@ -1030,6 +1209,77 @@ PlayerMovementSection:AddToggle({
     end
 })
 
+-- Auto Trash Talk Section
+local AutoSpamTrashSection = PlayerTab:CreateSection({
+    Name = "Auto Trash Talk"
+})
+
+AutoSpamTrashSection:AddToggle({
+    Name = "Enable Auto Spam",
+    Flag = "AutoSpamTrashTalk",
+    Callback = function(value)
+        autoSpamTrashTalk = value
+        if value then
+            print("💬 Auto Spam Trash Talk ENABLED")
+            lastAutoSpam = tick() -- Start immediately
+        else
+            print("✗ Auto Spam Trash Talk DISABLED")
+        end
+    end
+})
+
+AutoSpamTrashSection:AddSlider({
+    Name = "Frequency",
+    Flag = "AutoSpamFrequency",
+    Value = 5,
+    Min = 2,
+    Max = 30,
+    Format = function(Value)
+        return "Every " .. tostring(Value) .. "s"
+    end,
+    Callback = function(value)
+        autoSpamFrequency = value
+        print("Auto spam frequency set to:", value, "seconds")
+    end
+})
+
+AutoSpamTrashSection:AddButton({
+    Name = "Send Message Now",
+    Callback = function()
+        print("💬 Sending spam message now...")
+        sendTrashTalk("spam", true)
+    end
+})
+
+AutoSpamTrashSection:AddButton({
+    Name = "Scan Chat Remotes",
+    Callback = function()
+        print("=== SCANNING FOR CHAT REMOTES ===")
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        
+        print("Checking ReplicatedStorage...")
+        for _, child in pairs(ReplicatedStorage:GetDescendants()) do
+            if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+                local name = child.Name:lower()
+                if name:match("chat") or name:match("message") or name:match("say") or name:match("talk") then
+                    print("✓ Found:", child:GetFullName(), "Type:", child.ClassName)
+                end
+            end
+        end
+        
+        print("Checking TextChatService...")
+        local TextChatService = game:GetService("TextChatService")
+        print("  ChatVersion:", TextChatService.ChatVersion)
+        if TextChatService:FindFirstChild("TextChannels") then
+            for _, channel in pairs(TextChatService.TextChannels:GetChildren()) do
+                print("  ✓ Channel:", channel.Name)
+            end
+        end
+        
+        print("=== SCAN COMPLETE ===")
+    end
+})
+
 -- Movement Settings
 local PlayerSettingsSection = PlayerTab:CreateSection({
     Name = "Settings",
@@ -1262,6 +1512,135 @@ UserInputService.JumpRequest:Connect(function()
         end
     end
 end)
+
+-- ============================================
+-- TRASH TALK HELPER FUNCTION
+-- ============================================
+
+local function sendTrashTalk(messageType, ignoreDelay)
+    -- Safety check: messageType must be valid
+    if not messageType or type(messageType) ~= "string" then
+        warn("sendTrashTalk called with invalid messageType:", messageType)
+        return
+    end
+    
+    if not trashTalkEnabled and messageType ~= "spam" then return end
+    if messageType == "spam" and not autoSpamTrashTalk then return end
+    
+    -- Check delay (unless ignoreDelay is true, used for auto spam)
+    if not ignoreDelay then
+        if tick() - lastTrashTalk < trashTalkDelay then
+            return -- Too soon
+        end
+    end
+    
+    -- Get random message from the appropriate list
+    local messageList = trashTalkMessages[messageType]
+    if not messageList or #messageList == 0 then 
+        warn("No messages found for type:", messageType)
+        return 
+    end
+    
+    local randomMessage = messageList[math.random(1, #messageList)]
+    
+    -- Try multiple chat systems
+    local success = false
+    local err = nil
+    
+    -- Method 1: Try TextChatService (new chat system)
+    success, err = pcall(function()
+        local TextChatService = game:GetService("TextChatService")
+        local textChannel = TextChatService:FindFirstChild("TextChannels")
+        if textChannel then
+            textChannel = textChannel:FindFirstChild("RBXGeneral")
+            if textChannel and textChannel.SendAsync then
+                textChannel:SendAsync(randomMessage)
+                return true
+            end
+        end
+        error("TextChatService not available")
+    end)
+    
+    if success then
+        if messageType == "spam" then
+            print("💬 [AUTO] Trash talk sent:", randomMessage)
+        else
+            print("💬 Trash talk sent:", randomMessage)
+        end
+        lastTrashTalk = tick()
+        return
+    end
+    
+    -- Method 2: Try DefaultChatSystemChatEvents (legacy chat)
+    success, err = pcall(function()
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        local DefaultChat = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+        
+        if not DefaultChat then
+            error("DefaultChatSystemChatEvents not found")
+        end
+        
+        local SayMessage = DefaultChat:FindFirstChild("SayMessageRequest")
+        if not SayMessage then
+            error("SayMessageRequest not found")
+        end
+        
+        SayMessage:FireServer(randomMessage, "All")
+    end)
+    
+    if success then
+        if messageType == "spam" then
+            print("💬 [AUTO] Trash talk sent:", randomMessage)
+        else
+            print("💬 Trash talk sent:", randomMessage)
+        end
+        lastTrashTalk = tick()
+        return
+    end
+    
+    -- Method 3: Try game-specific chat (some games have custom chat)
+    success, err = pcall(function()
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        
+        -- Try common custom chat remotes
+        local chatRemotes = {
+            "ChatRemote",
+            "ChatEvent",
+            "SendMessage",
+            "Chat",
+            "MessageRemote"
+        }
+        
+        for _, remoteName in pairs(chatRemotes) do
+            local remote = ReplicatedStorage:FindFirstChild(remoteName)
+            if remote then
+                if remote:IsA("RemoteEvent") then
+                    remote:FireServer(randomMessage)
+                    return true
+                elseif remote:IsA("RemoteFunction") then
+                    remote:InvokeServer(randomMessage)
+                    return true
+                end
+            end
+        end
+        
+        error("No custom chat remote found")
+    end)
+    
+    if success then
+        if messageType == "spam" then
+            print("💬 [AUTO] Trash talk sent:", randomMessage)
+        else
+            print("💬 Trash talk sent:", randomMessage)
+        end
+        lastTrashTalk = tick()
+        return
+    end
+    
+    -- All methods failed
+    warn("⚠️ All chat methods failed. This game may use a custom chat system.")
+    warn("   Try looking in ReplicatedStorage for chat-related remotes.")
+end
 
 -- ============================================
 -- MAP BOUNDS HELPER FUNCTIONS
@@ -1649,6 +2028,14 @@ RunService.Heartbeat:Connect(function(dt)
             humanoid.WalkSpeed = walkspeedValue
         end
         
+        -- Auto Spam Trash Talk
+        if autoSpamTrashTalk then
+            if tick() - lastAutoSpam >= autoSpamFrequency then
+                sendTrashTalk("spam", true)
+                lastAutoSpam = tick()
+            end
+        end
+        
         -- Bhop system (works independently of custom walkspeed)
         if bhopEnabled and humanoid and rootPart then
             local moveDir = humanoid.MoveDirection
@@ -1873,6 +2260,75 @@ RunService.Heartbeat:Connect(function(dt)
 end)
 
 -- ============================================
+-- MISC TAB - TRASH TALK SYSTEM
+-- ============================================
+
+local MiscTab = FlingWindow:CreateTab({
+    Name = "Misc"
+})
+
+local TrashTalkSection = MiscTab:CreateSection({
+    Name = "Auto Trash Talk"
+})
+
+TrashTalkSection:AddToggle({
+    Name = "Enable Trash Talk",
+    Flag = "TrashTalkEnabled",
+    Callback = function(value)
+        trashTalkEnabled = value
+        if value then
+            print("💬 Auto Trash Talk ENABLED")
+        else
+            print("✗ Auto Trash Talk DISABLED")
+        end
+    end
+})
+
+TrashTalkSection:AddToggle({
+    Name = "Trash Talk on Kill",
+    Flag = "TrashTalkOnKill",
+    Value = true,
+    Callback = function(value)
+        trashTalkOnKill = value
+        print("Trash talk on kill:", value and "ENABLED" or "DISABLED")
+    end
+})
+
+TrashTalkSection:AddToggle({
+    Name = "Trash Talk on Fling",
+    Flag = "TrashTalkOnFling",
+    Value = true,
+    Callback = function(value)
+        trashTalkOnFling = value
+        print("Trash talk on fling:", value and "ENABLED" or "DISABLED")
+    end
+})
+
+TrashTalkSection:AddSlider({
+    Name = "Message Delay",
+    Flag = "TrashTalkDelay",
+    Value = 3,
+    Min = 1,
+    Max = 10,
+    Format = function(Value)
+        return "Delay: " .. tostring(Value) .. "s"
+    end,
+    Callback = function(value)
+        trashTalkDelay = value
+        print("Trash talk delay set to:", value, "seconds")
+    end
+})
+
+TrashTalkSection:AddButton({
+    Name = "Test Trash Talk",
+    Callback = function()
+        print("🧪 Testing trash talk...")
+        lastTrashTalk = 0 -- Reset delay
+        sendTrashTalk("kill")
+    end
+})
+
+-- ============================================
 -- VISUAL TAB - ESP SYSTEM
 -- ============================================
 
@@ -1992,6 +2448,11 @@ local function flingTarget(target)
     )
     bv.Parent = target
     
+    -- Send trash talk on fling
+    if trashTalkOnFling then
+        sendTrashTalk("fling")
+    end
+    
     task.delay(0.1, function()
         if bv and bv.Parent then
             bv:Destroy()
@@ -2070,6 +2531,11 @@ local function killAuraTarget(rootPart)
                 local timeElapsed = tick() - startTime
                 print("✓ KillAura: Target DIED after", math.floor(timeElapsed * 10) / 10, "seconds (" .. slamCount .. " slams)")
                 slamLoop:Disconnect()
+                
+                -- Send trash talk on kill
+                if trashTalkOnKill then
+                    sendTrashTalk("kill")
+                end
                 
                 -- Destroy grab connection
                 local DestroyGrabLine = GrabEvents:FindFirstChild("DestroyGrabLine")
@@ -2878,8 +3344,3 @@ CreateGrabLine.OnClientEvent:Connect(function(player, grabbedPart, offset)
         flingTarget(grabbedPart)
     end
 end)
-
-print("═══════════════════════════════════════")
-print("🎯 FLING SCRIPT LOADED")
-print("UI Library Loaded Successfully")
-print("═══════════════════════════════════════")
