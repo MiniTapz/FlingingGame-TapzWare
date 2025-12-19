@@ -605,87 +605,36 @@ RingAnimationSection:AddDropdown({
 })
 
 -- ============================================
--- TARGET SYSTEM
+-- TARGET SYSTEM (SIMPLIFIED - AUTO-TARGET ONLY)
 -- ============================================
 local TargetSection = FlingTab:CreateSection({
     Name = "Target Player"
 })
 
--- Function to get player list
-local function getPlayerList()
-    local playerList = {}
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            table.insert(playerList, player.Name)
-        end
-    end
-    return playerList
-end
-
 TargetSection:AddToggle({
-    Name = "Enable Target",
-    Flag = "TargetEnabled",
+    Name = "Enable Auto Target",
+    Flag = "AutoTarget",
     Callback = function(value)
         targetEnabled = value
+        autoTargetEnabled = value
         if value then
-            if autoTargetEnabled then
-                print("🎯 Target Mode ENABLED - Auto-targeting closest player")
-            elseif targetPlayer then
-                print("🎯 Target Mode ENABLED - Following:", targetPlayer.Name)
-            else
-                print("⚠️ Target Mode ENABLED but no player selected!")
-            end
+            print("🎯 Auto Target ENABLED - Will follow closest player")
+            targetPlayer = nil -- Clear any previous selection
         else
-            print("✗ Target Mode DISABLED")
+            print("✗ Auto Target DISABLED")
+            targetPlayer = nil
             -- Stop any active tween
             if targetTween then
                 targetTween:Cancel()
                 targetTween = nil
             end
-        end
-    end
-})
-
-TargetSection:AddToggle({
-    Name = "Auto Target (Closest)",
-    Flag = "AutoTarget",
-    Callback = function(value)
-        autoTargetEnabled = value
-        if value then
-            print("🎯 Auto Target ENABLED - Will follow closest player")
-            targetPlayer = nil -- Clear manual selection
-        else
-            print("✗ Auto Target DISABLED")
-        end
-    end
-})
-
-TargetSection:AddDropdown({
-    Name = "Select Target",
-    Flag = "TargetPlayer",
-    List = getPlayerList(),
-    Callback = function(value)
-        -- Find the player object
-        targetPlayer = Players:FindFirstChild(value)
-        if targetPlayer then
-            print("🎯 Target selected:", targetPlayer.Name)
-            autoTargetEnabled = false -- Disable auto when manually selecting
-        else
-            print("⚠️ Player not found:", value)
-        end
-    end
-})
-
-TargetSection:AddButton({
-    Name = "Refresh Player List",
-    Callback = function()
-        print("🔄 Refreshing player list...")
-        -- This would need to recreate the dropdown, but the UI library might not support it
-        -- For now just print the current players
-        local players = getPlayerList()
-        print("Current players:")
-        for _, name in pairs(players) do
-            print("  -", name)
+            -- Clean up BodyPosition
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                local bodyPos = LocalPlayer.Character.HumanoidRootPart:FindFirstChild("TargetBodyPosition")
+                if bodyPos then
+                    bodyPos:Destroy()
+                end
+            end
         end
     end
 })
@@ -2124,9 +2073,15 @@ RunService.Heartbeat:Connect(function(dt)
             end
         end
         
-        -- Auto Strafe: Circular strafing around a moving anchor point
+-- ============================================
+-- CORRECT AUTO STRAFE - ORIGIN IS CENTER, CAMERA FOLLOWS IT
+-- ============================================
+-- Origin part is in the center (controlled by WASD)
+-- Camera focuses on origin part (not character)
+-- Character constantly strafes around the origin part
+
+        -- Auto Strafe: Origin is center, character orbits around it
         if autoStrafeEnabled and humanoid and rootPart then
-            local moveDir = humanoid.MoveDirection
             local Camera = workspace.CurrentCamera
             
             -- Initialize anchor at character position if not set
@@ -2145,33 +2100,44 @@ RunService.Heartbeat:Connect(function(dt)
                 autoStrafeAnchorPart.Parent = workspace
             end
             
-            -- Move the anchor based on player input relative to CAMERA look direction
-            if moveDir.Magnitude > 0 then
-                -- Get camera forward and right vectors (ignore Y)
-                local camLook = Camera.CFrame.LookVector
-                local camRight = Camera.CFrame.RightVector
+            -- Get camera forward and right vectors (ignore Y)
+            local camLook = Camera.CFrame.LookVector
+            local camRight = Camera.CFrame.RightVector
+            
+            -- Flatten to horizontal plane
+            camLook = Vector3.new(camLook.X, 0, camLook.Z).Unit
+            camRight = Vector3.new(camRight.X, 0, camRight.Z).Unit
+            
+            -- Build movement direction from WASD relative to camera
+            local forward = 0
+            local right = 0
+            
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then forward = forward + 1 end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then forward = forward - 1 end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then right = right + 1 end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then right = right - 1 end
+            
+            local inputDir = (camLook * forward + camRight * right)
+            
+            -- Move the ORIGIN PART based on WASD input at your actual effective speed
+            if inputDir.Magnitude > 0 then
+                inputDir = inputDir.Unit
                 
-                -- Flatten to horizontal plane
-                camLook = Vector3.new(camLook.X, 0, camLook.Z).Unit
-                camRight = Vector3.new(camRight.X, 0, camRight.Z).Unit
+                -- Get the ACTUAL effective speed considering all active modules
+                local effectiveSpeed = humanoid.WalkSpeed
                 
-                -- Build movement direction from WASD relative to camera
-                local forward = 0
-                local right = 0
-                
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then forward = forward + 1 end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then forward = forward - 1 end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then right = right + 1 end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then right = right - 1 end
-                
-                local inputDir = (camLook * forward + camRight * right)
-                if inputDir.Magnitude > 0 then
-                    inputDir = inputDir.Unit
-                    
-                    -- Use actual walkspeed value for anchor movement
-                    local moveSpeed = customWalkspeedEnabled and walkspeedValue or humanoid.WalkSpeed
-                    autoStrafeAnchor = autoStrafeAnchor + (inputDir * moveSpeed * dt)
+                -- If bhop is enabled, use current bhop speed
+                if bhopEnabled and currSpeed then
+                    effectiveSpeed = currSpeed
                 end
+                
+                -- If custom walkspeed is enabled, use that
+                if customWalkspeedEnabled and walkspeedValue then
+                    effectiveSpeed = walkspeedValue
+                end
+                
+                -- Move origin at FULL effective speed (this is what you're controlling)
+                autoStrafeAnchor = autoStrafeAnchor + (inputDir * effectiveSpeed * dt)
             end
             
             -- Update anchor part position
@@ -2179,41 +2145,65 @@ RunService.Heartbeat:Connect(function(dt)
                 autoStrafeAnchorPart.Position = autoStrafeAnchor
             end
             
-            -- Increment circular angle
-            autoStrafeAngle = autoStrafeAngle + (autoStrafeIntensity * dt)
+            -- CAMERA FOLLOWS THE ORIGIN PART (not the character)
+            local cameraOffset = Vector3.new(0, 10, 20) -- Adjust this for camera distance/height
+            Camera.CameraType = Enum.CameraType.Scriptable
+            Camera.CFrame = CFrame.new(autoStrafeAnchor + cameraOffset, autoStrafeAnchor)
+            
+            -- Increment circular angle based on intensity (character rotates around origin)
+            autoStrafeAngle = autoStrafeAngle + (autoStrafeIntensity * dt * 3)
             if autoStrafeAngle >= math.pi * 2 then
                 autoStrafeAngle = 0
             end
             
-            -- Calculate position on circle around anchor using the radius slider
+            -- Calculate where character SHOULD be on the circle around origin
             local x = math.sin(autoStrafeAngle) * autoStrafeRadius
             local z = math.cos(autoStrafeAngle) * autoStrafeRadius
             
-            -- Target position on the circle
+            -- Target position on the circle (around the origin part)
             local targetPos = autoStrafeAnchor + Vector3.new(x, 0, z)
             
-            -- Move character toward target position
+            -- Move character to target position VERY AGGRESSIVELY
             local currentPos = Vector3.new(rootPart.Position.X, 0, rootPart.Position.Z)
             local direction = (Vector3.new(targetPos.X, 0, targetPos.Z) - currentPos)
             
-            if direction.Magnitude > 0.1 then
+            if direction.Magnitude > 0.05 then
                 direction = direction.Unit
                 
-                -- Use actual walkspeed for velocity
-                local speed = customWalkspeedEnabled and walkspeedValue or humanoid.WalkSpeed
+                -- Use ACTUAL effective walkspeed for character velocity
+                local speed = humanoid.WalkSpeed
+                if bhopEnabled and currSpeed then
+                    speed = currSpeed
+                elseif customWalkspeedEnabled and walkspeedValue then
+                    speed = walkspeedValue
+                end
+                
+                -- Calculate tangential velocity for circular motion
+                local tangentAngle = autoStrafeAngle + math.pi / 2 -- 90 degrees ahead for tangent
+                local tangentX = math.sin(tangentAngle)
+                local tangentZ = math.cos(tangentAngle)
+                local tangentDir = Vector3.new(tangentX, 0, tangentZ)
+                
+                -- Combine: pull toward circle position + circular strafe motion
+                local finalVelocity = (direction * speed * 10) + (tangentDir * speed * autoStrafeIntensity * 4)
+                
                 rootPart.Velocity = Vector3.new(
-                    direction.X * speed * 3, -- Multiply by 3 for aggressive following
+                    finalVelocity.X,
                     rootPart.Velocity.Y,
-                    direction.Z * speed * 3
+                    finalVelocity.Z
                 )
             end
         else
-            -- Reset anchor when disabled and destroy the part
+            -- Reset everything when disabled
             autoStrafeAnchor = nil
             if autoStrafeAnchorPart then
                 autoStrafeAnchorPart:Destroy()
                 autoStrafeAnchorPart = nil
             end
+            
+            -- Reset camera to normal
+            local Camera = workspace.CurrentCamera
+            Camera.CameraType = Enum.CameraType.Custom
         end
         
         -- Force Shift Lock enforcement
